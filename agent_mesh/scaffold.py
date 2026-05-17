@@ -14,6 +14,15 @@ from agent_mesh.utils.paths import ensure_directory
 SUPPORTED_ADAPTERS = ["generic", "claude", "codex", "cursor", "opencode", "pi", "windsurf"]
 
 WORKFLOW_STEPS: Dict[str, List[str]] = {
+    "setup": [
+        "Detect repo mode before making changes.",
+        "Read `AGENTS.md`, `CONTEXT.md`, and `CONTEXT-MAP.md`.",
+        "If `.agentic/` already exists, inspect current work, claims, reviews, and handoffs first.",
+        "If the repo is `greenfield`, scaffold Agent Mesh state and route into `/align`, `/to-prd`, and `/to-tasks`.",
+        "If the repo is `brownfield adoption`, derive durable context from existing code, docs, and conventions before normalizing them into `.agentic/` state.",
+        "Install or refresh adapters only after deciding setup or adoption work is needed.",
+        "Do not overwrite existing coordination state without explicit confirmation.",
+    ],
     "align": [
         "Determine affected context from `CONTEXT-MAP.md`.",
         "Read relevant context files and ADRs.",
@@ -44,11 +53,13 @@ WORKFLOW_STEPS: Dict[str, List[str]] = {
         "Set the task status.",
     ],
     "claim": [
+        "Confirm the repo is in `ongoing coordination` mode, or finish setup/adoption work first.",
+        "Inspect current status, claims, reviews, and handoffs.",
         "Validate the work item.",
         "Check for an existing claim.",
+        "Create or verify a dedicated worktree and task branch unless worktree isolation is disabled.",
         "Create the claim file.",
-        "Create or verify the branch and worktree.",
-        "Output the next implementation steps.",
+        "Output the next implementation steps, including the worktree path to enter.",
     ],
     "implement": [
         "Read the work item, claim, PRD, context, and ADRs.",
@@ -121,6 +132,9 @@ def init_repo(
     adapters: Iterable[str],
     force: bool = False,
     dashboard: bool = True,
+    worktree_policy: str = "required",
+    worktree_root: str | None = None,
+    claim_stale_after_minutes: int = 120,
 ) -> InitResult:
     created: List[Path] = []
     skipped: List[Path] = []
@@ -131,6 +145,15 @@ def init_repo(
         project_key=project_key,
         planning={"provider": provider, "external_project": None},
         adapters=selected_adapters,
+        coordination={
+            "strategy": "git_files",
+            "work_dir": ".agentic/work",
+            "claims_dir": ".agentic/claims",
+            "reviews_dir": ".agentic/reviews",
+            "worktree_policy": worktree_policy,
+            "worktree_root": worktree_root,
+            "claim_stale_after_minutes": claim_stale_after_minutes,
+        },
         dashboard={"enabled": dashboard, "output_dir": ".agentic/dashboard"},
     )
 
@@ -255,7 +278,7 @@ def install_adapters(repo_root: Path, adapters: Iterable[str], force: bool = Fal
             record_result(
                 write_text(
                     repo_root / "CLAUDE.md",
-                    "# Claude Code\n\nRead `AGENTS.md` and `.agentic/workflows/` first.\n",
+                    "# Claude Code\n\nStart with `AGENTS.md` and follow its repo-mode detection before picking a workflow from `.agentic/workflows/`.\n",
                     force=force,
                 ),
                 created,
@@ -275,9 +298,7 @@ def install_adapters(repo_root: Path, adapters: Iterable[str], force: bool = Fal
                 record_result(
                     write_text(
                         prompt_dir / "{0}.md".format(skill.name),
-                        "Read `AGENTS.md`, then follow `.agentic/workflows/{0}.md`.\n".format(
-                            skill.name
-                        ),
+                        "Read `AGENTS.md`, use its repo-mode detection, then follow `.agentic/workflows/{0}.md`.\n".format(skill.name),
                         force=force,
                     ),
                     created,
@@ -287,7 +308,7 @@ def install_adapters(repo_root: Path, adapters: Iterable[str], force: bool = Fal
             record_result(
                 write_text(
                     repo_root / ".cursor/rules/agent-mesh.mdc",
-                    "Read `AGENTS.md` and `.agentic/workflows/` before acting.\n",
+                    "Read `AGENTS.md`, determine repo mode, then use `.agentic/workflows/`.\n",
                     force=force,
                 ),
                 created,
@@ -297,7 +318,7 @@ def install_adapters(repo_root: Path, adapters: Iterable[str], force: bool = Fal
             record_result(
                 write_text(
                     repo_root / "OPENCODE.md",
-                    "# OpenCode\n\nUse `AGENTS.md` and `.agentic/workflows/` as the canonical instructions.\n",
+                    "# OpenCode\n\nUse `AGENTS.md` for repo-mode detection, then follow `.agentic/workflows/` as the canonical instructions.\n",
                     force=force,
                 ),
                 created,
@@ -307,7 +328,7 @@ def install_adapters(repo_root: Path, adapters: Iterable[str], force: bool = Fal
             record_result(
                 write_text(
                     repo_root / ".windsurfrules",
-                    "Read AGENTS.md and .agentic/workflows/ before acting.\n",
+                    "Read AGENTS.md, determine repo mode, then use .agentic/workflows/.\n",
                     force=force,
                 ),
                 created,
@@ -325,7 +346,7 @@ def install_skill_wrapper(base_dir: Path, force: bool) -> InitResult:
         record_result(
             write_text(
                 skill_dir / "SKILL.md",
-                "Read `AGENTS.md`, then follow `.agentic/workflows/{0}.md`.\n".format(skill.name),
+                "Read `AGENTS.md`, use its repo-mode detection, then follow `.agentic/workflows/{0}.md`.\n".format(skill.name),
                 force=force,
             ),
             created,
@@ -386,10 +407,19 @@ This repository uses Agent Mesh for local-first coordination.
 ## Working rules
 
 1. Read `.agentic/context/CONTEXT.md` and `.agentic/context/CONTEXT-MAP.md` first.
-2. Use `.agentic/workflows/*.md` as the canonical workflow definitions.
-3. Keep coordination state human-readable and reviewable.
-4. Do not overwrite existing work without explicit confirmation.
-5. Prefer local-first flows; cloud runners are optional and future-facing.
+2. Detect repo mode before choosing a workflow:
+   - `greenfield`: little or no durable product/code context yet
+   - `brownfield adoption`: meaningful repo context exists, but Mesh state does not
+   - `ongoing coordination`: `.agentic/` already exists with work/claim/review state
+3. Inspect `.agentic/project.json` and current coordination state before proposing `/setup` or `/claim`.
+4. Use `.agentic/workflows/*.md` as the canonical workflow definitions.
+5. Keep coordination state human-readable and reviewable.
+6. Claims should use a dedicated worktree and branch unless the project explicitly disables worktree isolation.
+7. Worktrees should be named by reusable workspace or lane identity, not by task ID.
+8. Stale claims should be resumed or explicitly taken over; safe takeover should keep the branch but allocate a new workspace by default.
+9. Do not implement claimed work from the shared root checkout when worktree isolation is enabled.
+10. Do not overwrite existing work without explicit confirmation.
+11. Prefer local-first flows; cloud runners are optional and future-facing.
 """.format(project_name=project_name)
 
 
@@ -400,6 +430,8 @@ project_key = "{2}"
 default_branch = "{3}"
 provider = "{4}"
 dashboard_enabled = {5}
+worktree_policy = "{6}"
+claim_stale_after_minutes = {7}
 """.format(
         config.schema_version,
         config.project_name,
@@ -407,6 +439,8 @@ dashboard_enabled = {5}
         config.default_branch,
         config.planning.provider,
         "true" if config.dashboard.enabled else "false",
+        config.coordination.worktree_policy,
+        config.coordination.claim_stale_after_minutes,
     )
 
 
@@ -424,7 +458,7 @@ name: {0}
 description: {1}
 ---
 
-Read `AGENTS.md` first, then follow `.agentic/workflows/{0}.md`.
+Read `AGENTS.md` first, use its repo-mode detection, then follow `.agentic/workflows/{0}.md`.
 """.format(skill.name, skill.summary)
 
 

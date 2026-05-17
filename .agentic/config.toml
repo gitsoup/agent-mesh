@@ -4,3 +4,5 @@ project_key = "MESH"
 default_branch = "main"
 provider = "local"
 dashboard_enabled = true
+worktree_policy = "required"
+claim_stale_after_minutes = 120

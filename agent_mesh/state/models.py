@@ -21,6 +21,13 @@ class Evidence(BaseModel):
     created_at: str
 
 
+class ClaimEvent(BaseModel):
+    action: str
+    at: str
+    by: str
+    note: Optional[str] = None
+
+
 class WorkItem(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -51,11 +58,13 @@ class Claim(BaseModel):
     agent_runtime: str
     role: str
     machine: str
+    workspace_id: Optional[str] = None
     worktree: Optional[str] = None
     branch: str
     claimed_at: str
     last_seen: str
     evidence: List[Evidence] = Field(default_factory=list)
+    events: List[ClaimEvent] = Field(default_factory=list)
 
 
 class PullRequestRef(BaseModel):

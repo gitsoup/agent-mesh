@@ -1,3 +1,3 @@
 # Claude Code
 
-Read `AGENTS.md` and `.agentic/workflows/` first.
+Start with `AGENTS.md` and follow its repo-mode detection before picking a workflow from `.agentic/workflows/`.

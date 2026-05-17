@@ -15,6 +15,19 @@
 - `agent_mesh/state/`: persistent models, storage, and validation
 - `tests/`: behavior and regression coverage
 
+## Startup artifacts
+
+- `AGENTS.md`: startup contract, mode detection, and repo-wide guardrails
+- `.agentic/project.json`: installed adapters and coordination configuration
+- `.agentic/work/`: task inventory and readiness state
+- `.agentic/claims/`: active task ownership
+- claim files also record the assigned task branch and dedicated worktree path
+- `.agentic/reviews/`: pending or completed review packets
+- `.agentic/handoffs/`: continuation context between sessions
+- `.agentic/workflows/setup.md`: first-run routing for greenfield and brownfield
+- `.agentic/workflows/claim.md`: transition from inspected coordination state to
+  active implementation
+
 ## Next product areas
 
 - onboarding and first-run TUI

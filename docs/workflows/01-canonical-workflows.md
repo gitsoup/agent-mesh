@@ -2,6 +2,36 @@
 
 These workflows should be rendered into `.agentic/workflows/*.md` during `mesh init`.
 
+## Startup routing
+
+Before invoking a workflow, agents should inspect `AGENTS.md`,
+`.agentic/context/CONTEXT.md`, `.agentic/context/CONTEXT-MAP.md`,
+`.agentic/project.json` when present, and current coordination state.
+
+Repo mode should be classified as:
+
+- `greenfield`: no durable product/code context and no usable Mesh state
+- `brownfield adoption`: meaningful repo context exists, but Mesh state is
+  missing or incomplete
+- `ongoing coordination`: `.agentic/` exists with work, claim, review, or
+  handoff state that should be continued
+
+Prefer the most coordinated mode already supported by repo state.
+
+## /setup
+
+Input: repo root and current repo state.
+
+Steps:
+
+1. Detect repo mode before making changes.
+2. Read `AGENTS.md`, `CONTEXT.md`, and `CONTEXT-MAP.md`.
+3. If `.agentic/` already exists, inspect current work, claims, reviews, and handoffs first.
+4. If the repo is `greenfield`, scaffold Agent Mesh state and route into `/align`, `/to-prd`, and `/to-tasks`.
+5. If the repo is `brownfield adoption`, derive durable context from existing code, docs, and conventions before normalizing them into `.agentic/` state.
+6. Install or refresh adapters only after deciding setup or adoption work is needed.
+7. Do not overwrite existing coordination state without explicit confirmation.
+
 ## /align
 
 Input: idea, plan, feature, bug, PRD draft, or architecture proposal.
@@ -62,13 +92,22 @@ Input: work item ID.
 
 Steps:
 
-1. Validate work item.
-2. Check existing claim.
-3. Create claim file.
-4. Create branch name.
-5. Create/check worktree if configured.
-6. Commit/push claim if remote exists.
-7. Output next steps.
+1. Confirm the repo is in `ongoing coordination` mode, or finish setup/adoption work first.
+2. Inspect current status, claims, reviews, and handoffs.
+3. Validate work item.
+4. Check existing claim.
+5. Create/check a dedicated worktree and task branch unless worktree isolation is disabled by project config.
+6. Create claim file.
+7. Commit/push claim if remote exists.
+8. Output next steps, including the worktree path to enter.
+
+Recovery:
+
+- If the claim already exists and the work is being continued by a new session, use `mesh claim <ID> --resume`.
+- If the claim is stale, use `mesh claim <ID> --takeover`.
+- Safe takeover should reuse the branch but allocate a new workspace by default.
+- Workspace identity should be lane-oriented and reusable across tasks; branch identity should stay task-oriented.
+- Prefer explicit recovery over deleting claim files manually.
 
 ## /implement
 

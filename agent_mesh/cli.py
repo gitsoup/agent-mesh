@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import argparse
 import socket
-from datetime import datetime, timezone
+import subprocess
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Iterable, List, Optional, Sequence
 
@@ -23,7 +24,7 @@ SUPPORTED_ADAPTERS = ["generic", "claude", "codex", "cursor", "opencode", "pi", 
 
 def emit(message: str) -> None:
     if console is not None:
-        console.print(message)
+        console.print(message, markup=False)
         return
     print(message)
 
@@ -51,6 +52,13 @@ def build_parser() -> argparse.ArgumentParser:
     init_parser.add_argument("--yes", action="store_true")
     init_parser.add_argument("--dashboard", dest="dashboard", action="store_true", default=True)
     init_parser.add_argument("--no-dashboard", dest="dashboard", action="store_false")
+    init_parser.add_argument(
+        "--worktree-policy",
+        choices=["required", "preferred", "off"],
+        default="required",
+    )
+    init_parser.add_argument("--worktree-root")
+    init_parser.add_argument("--claim-stale-after-minutes", type=int, default=120)
     init_parser.set_defaults(func=handle_init)
 
     doctor_parser = subparsers.add_parser("doctor", help="Validate Agent Mesh config and state.")
@@ -106,8 +114,11 @@ def build_parser() -> argparse.ArgumentParser:
     claim_parser.add_argument("--agent", default="codex")
     claim_parser.add_argument("--role", default="implementer")
     claim_parser.add_argument("--machine", default=socket.gethostname())
+    claim_parser.add_argument("--workspace-id")
     claim_parser.add_argument("--worktree")
     claim_parser.add_argument("--branch")
+    claim_parser.add_argument("--resume", action="store_true")
+    claim_parser.add_argument("--takeover", action="store_true")
     claim_parser.add_argument("--no-push", action="store_true")
     claim_parser.set_defaults(func=handle_claim)
 
@@ -166,6 +177,9 @@ def handle_init(args: argparse.Namespace) -> int:
         adapters=adapters,
         force=args.force,
         dashboard=args.dashboard,
+        worktree_policy=args.worktree_policy,
+        worktree_root=args.worktree_root,
+        claim_stale_after_minutes=args.claim_stale_after_minutes,
     )
     emit("Initialized Agent Mesh in {0}".format(repo_root))
     emit("Created {0} files.".format(len(result.created)))
@@ -202,7 +216,7 @@ def handle_status(_: argparse.Namespace) -> int:
     for line in summarize_work_items(work_items):
         emit(line)
     emit("Claims: {0}".format(len(claims)))
-    for line in summarize_claims(claims):
+    for line in summarize_claims(claims, config.coordination.claim_stale_after_minutes):
         emit(line)
     emit("Reviews: {0}".format(len(reviews)))
     for line in summarize_reviews(reviews):
@@ -287,16 +301,31 @@ def handle_task_show(args: argparse.Namespace) -> int:
 
 
 def handle_claim(args: argparse.Namespace) -> int:
-    from agent_mesh.state.models import Claim, WorkItem
+    from agent_mesh.config import load_project_config
+    from agent_mesh.state.models import Claim, ClaimEvent, WorkItem
     from agent_mesh.state.storage import load_model, resolve_repo_root, save_model_json
 
     repo_root = resolve_repo_root(Path.cwd())
+    config = load_project_config(repo_root)
     work_path = repo_root / ".agentic/work" / "{0}.json".format(args.work_id)
     work_item = load_model(work_path, WorkItem)
 
     existing_claim_path = repo_root / ".agentic/claims" / "{0}.json".format(args.work_id)
+    if args.resume and args.takeover:
+        emit("ERROR: choose only one of --resume or --takeover")
+        return 1
     if existing_claim_path.exists():
-        emit("ERROR: claim already exists for {0}".format(args.work_id))
+        claim = load_model(existing_claim_path, Claim)
+        return handle_existing_claim(
+            repo_root=repo_root,
+            config=config,
+            work_item=work_item,
+            claim=claim,
+            claim_path=existing_claim_path,
+            args=args,
+        )
+    if args.resume or args.takeover:
+        emit("ERROR: no existing claim for {0}".format(args.work_id))
         return 1
     if work_item.status not in ["ready", "in_progress"]:
         emit("ERROR: work item {0} is not ready to claim".format(args.work_id))
@@ -304,6 +333,18 @@ def handle_claim(args: argparse.Namespace) -> int:
 
     now = utc_now()
     branch = args.branch or "feat/{0}-{1}".format(args.work_id, slugify(work_item.title))
+    workspace_id = args.workspace_id or derive_workspace_id(args.agent, args.machine)
+    try:
+        worktree = prepare_claim_workspace(
+            repo_root,
+            config.default_branch,
+            branch,
+            workspace_id,
+            args.worktree,
+        )
+    except RuntimeError as error:
+        emit("ERROR: {0}".format(error))
+        return 1
     claim = Claim(
         work_id=args.work_id,
         status="in_progress",
@@ -311,10 +352,18 @@ def handle_claim(args: argparse.Namespace) -> int:
         agent_runtime=args.agent,
         role=args.role,
         machine=args.machine,
-        worktree=args.worktree,
+        workspace_id=workspace_id,
+        worktree=worktree,
         branch=branch,
         claimed_at=now,
         last_seen=now,
+        events=[
+            ClaimEvent(
+                action="claimed",
+                at=now,
+                by="agent:{0}:{1}".format(args.agent, args.machine),
+            )
+        ],
     )
     save_model_json(existing_claim_path, claim)
 
@@ -322,6 +371,11 @@ def handle_claim(args: argparse.Namespace) -> int:
     work_item.updated_at = now
     save_model_json(work_path, work_item)
     emit("Claimed {0} on branch {1}".format(args.work_id, branch))
+    if worktree is not None:
+        emit("Worktree: {0}".format(worktree))
+        if workspace_id:
+            emit("Workspace: {0}".format(workspace_id))
+        emit("Next: cd {0}".format(worktree))
     return 0
 
 
@@ -400,6 +454,240 @@ def derive_project_key(project_name: str) -> str:
 
 def parse_csv(raw: str) -> List[str]:
     return [item.strip() for item in raw.split(",") if item.strip()]
+
+
+def parse_utc(raw: str) -> datetime:
+    return datetime.fromisoformat(raw.replace("Z", "+00:00"))
+
+
+def derive_workspace_id(agent: str, machine: str, suffix: Optional[str] = None) -> str:
+    base = "{0}-{1}".format(slugify(agent), slugify(machine))
+    if suffix:
+        return "{0}-{1}".format(base, slugify(suffix))
+    return base
+
+
+def claim_activity(claim, stale_after_minutes: int, now: Optional[datetime] = None) -> str:
+    now = now or datetime.now(timezone.utc)
+    stale_after = now - timedelta(minutes=stale_after_minutes)
+    return "stale" if parse_utc(claim.last_seen) < stale_after else "active"
+
+
+def handle_existing_claim(repo_root, config, work_item, claim, claim_path, args) -> int:
+    from agent_mesh.state.models import ClaimEvent
+    from agent_mesh.state.storage import save_model_json
+
+    now = utc_now()
+    activity = claim_activity(claim, config.coordination.claim_stale_after_minutes)
+    actor = "agent:{0}:{1}".format(args.agent, args.machine)
+
+    if args.resume:
+        claim.claimed_by = actor
+        claim.agent_runtime = args.agent
+        claim.role = args.role
+        claim.machine = args.machine
+        claim.workspace_id = claim.workspace_id or args.workspace_id or derive_workspace_id(
+            args.agent, args.machine
+        )
+        claim.last_seen = now
+        claim.status = "in_progress"
+        claim.events.append(ClaimEvent(action="resumed", at=now, by=actor))
+        save_model_json(claim_path, claim)
+        if work_item.status == "ready":
+            work_item.status = "in_progress"
+            work_item.updated_at = now
+            save_model_json(repo_root / ".agentic/work" / "{0}.json".format(work_item.id), work_item)
+        emit("Resumed {0} on branch {1}".format(work_item.id, claim.branch))
+        if claim.worktree:
+            emit("Worktree: {0}".format(claim.worktree))
+            if claim.workspace_id:
+                emit("Workspace: {0}".format(claim.workspace_id))
+            emit("Next: cd {0}".format(claim.worktree))
+        return 0
+
+    if args.takeover:
+        if activity != "stale":
+            emit(
+                "ERROR: claim for {0} is still active; use --resume to continue it or wait until it is stale".format(
+                    work_item.id
+                )
+            )
+            return 1
+        requested_branch = args.branch or claim.branch
+        takeover_workspace_id = args.workspace_id or derive_workspace_id(
+            args.agent, args.machine, now.replace(":", "").replace("-", "").lower()
+        )
+        requested_worktree = args.worktree
+        try:
+            release_stale_worktree_branch(claim)
+            claim.worktree = prepare_claim_workspace(
+                repo_root,
+                config.default_branch,
+                requested_branch,
+                takeover_workspace_id,
+                requested_worktree,
+            )
+        except RuntimeError as error:
+            emit("ERROR: {0}".format(error))
+            return 1
+        previous_owner = claim.claimed_by
+        claim.claimed_by = actor
+        claim.agent_runtime = args.agent
+        claim.role = args.role
+        claim.machine = args.machine
+        claim.workspace_id = takeover_workspace_id
+        claim.branch = requested_branch
+        claim.last_seen = now
+        claim.status = "in_progress"
+        claim.events.append(
+            ClaimEvent(
+                action="taken_over",
+                at=now,
+                by=actor,
+                note="previous owner: {0}".format(previous_owner),
+            )
+        )
+        save_model_json(claim_path, claim)
+        if work_item.status == "ready":
+            work_item.status = "in_progress"
+            work_item.updated_at = now
+            save_model_json(repo_root / ".agentic/work" / "{0}.json".format(work_item.id), work_item)
+        emit("Took over stale claim for {0} on branch {1}".format(work_item.id, claim.branch))
+        if claim.worktree:
+            emit("Worktree: {0}".format(claim.worktree))
+            if claim.workspace_id:
+                emit("Workspace: {0}".format(claim.workspace_id))
+            emit("Next: cd {0}".format(claim.worktree))
+        return 0
+
+    emit(
+        "ERROR: claim already exists for {0} ({1}); use --resume to continue it or --takeover if it becomes stale".format(
+            work_item.id, activity
+        )
+    )
+    return 1
+
+
+def run_git(repo_root: Path, args: Sequence[str]) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", *args],
+        cwd=repo_root,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+
+def branch_exists(repo_root: Path, branch: str) -> bool:
+    result = run_git(repo_root, ["show-ref", "--verify", "--quiet", "refs/heads/{0}".format(branch)])
+    return result.returncode == 0
+
+
+def ensure_git_ok(result: subprocess.CompletedProcess[str], action: str) -> None:
+    if result.returncode == 0:
+        return
+    detail = (result.stderr or result.stdout).strip() or "unknown git error"
+    raise RuntimeError("{0}: {1}".format(action, detail))
+
+
+def default_worktree_path(repo_root: Path, workspace_id: str, configured_root: Optional[str]) -> Path:
+    if configured_root:
+        root_path = Path(configured_root).expanduser()
+        if not root_path.is_absolute():
+            root_path = (repo_root / root_path).resolve()
+        else:
+            root_path = root_path.resolve()
+        return root_path / "{0}-{1}".format(repo_root.name, workspace_id)
+    return repo_root.parent / "{0}-{1}".format(repo_root.name, workspace_id)
+
+
+def prepare_claim_workspace(
+    repo_root: Path,
+    default_branch: str,
+    branch: str,
+    workspace_id: str,
+    requested_worktree: Optional[str],
+) -> Optional[str]:
+    from agent_mesh.config import load_project_config
+
+    config = load_project_config(repo_root)
+    policy = config.coordination.worktree_policy
+    if policy == "off":
+        return requested_worktree
+
+    worktree_path = Path(requested_worktree).expanduser() if requested_worktree else default_worktree_path(
+        repo_root, workspace_id, config.coordination.worktree_root
+    )
+    if not worktree_path.is_absolute():
+        worktree_path = (repo_root / worktree_path).resolve()
+    else:
+        worktree_path = worktree_path.resolve()
+
+    if worktree_path == repo_root.resolve():
+        if policy == "preferred":
+            return str(worktree_path)
+        raise RuntimeError("worktree policy requires a dedicated worktree, not the shared repo root")
+
+    if worktree_path.exists():
+        git_dir = worktree_path / ".git"
+        if git_dir.exists():
+            ensure_worktree_ready(repo_root, worktree_path, default_branch, branch)
+            return str(worktree_path)
+        raise RuntimeError("worktree path already exists and is not a git worktree: {0}".format(worktree_path))
+
+    base_ref = branch if branch_exists(repo_root, branch) else default_branch
+    git_args = ["worktree", "add"]
+    if not branch_exists(repo_root, branch):
+        git_args.extend(["-b", branch])
+    git_args.extend([str(worktree_path), base_ref])
+    ensure_git_ok(run_git(repo_root, git_args), "failed to create worktree")
+    return str(worktree_path)
+
+
+def ensure_worktree_ready(
+    repo_root: Path,
+    worktree_path: Path,
+    default_branch: str,
+    branch: str,
+) -> None:
+    current_branch = run_git(worktree_path, ["branch", "--show-current"])
+    ensure_git_ok(current_branch, "failed to inspect existing worktree branch")
+    active_branch = current_branch.stdout.strip()
+    if active_branch == branch:
+        return
+
+    dirty = run_git(worktree_path, ["status", "--porcelain"])
+    ensure_git_ok(dirty, "failed to inspect existing worktree status")
+    if dirty.stdout.strip():
+        raise RuntimeError(
+            "existing worktree is dirty on branch {0}; choose a different workspace or clean it first".format(
+                active_branch or "<detached>"
+            )
+        )
+
+    if branch_exists(repo_root, branch):
+        switch_result = run_git(worktree_path, ["switch", branch])
+        ensure_git_ok(switch_result, "failed to switch reusable worktree to existing branch")
+        return
+
+    switch_result = run_git(worktree_path, ["switch", "-c", branch, default_branch])
+    ensure_git_ok(switch_result, "failed to switch reusable worktree to a new branch")
+
+
+def release_stale_worktree_branch(claim) -> None:
+    if not claim.worktree:
+        return
+    worktree_path = Path(claim.worktree)
+    if not worktree_path.exists() or not (worktree_path / ".git").exists():
+        return
+
+    current_branch = run_git(worktree_path, ["branch", "--show-current"])
+    ensure_git_ok(current_branch, "failed to inspect stale worktree branch")
+    if current_branch.stdout.strip() != claim.branch:
+        return
+
+    detach_result = run_git(worktree_path, ["switch", "--detach", claim.branch])
+    ensure_git_ok(detach_result, "failed to detach stale worktree from claimed branch")
 
 
 def render_pr_body(work_item, claim) -> str:
@@ -556,9 +844,16 @@ def summarize_work_items(work_items: Iterable[object]) -> List[str]:
     return ["  - {0}: {1}".format(status, count) for status, count in sorted(counts.items())]
 
 
-def summarize_claims(claims: Iterable[object]) -> List[str]:
+def summarize_claims(claims: Iterable[object], stale_after_minutes: int) -> List[str]:
     return [
-        "  - {0}: {1} on {2}".format(claim.work_id, claim.agent_runtime, claim.branch)
+        "  - {0}: {1} [{2}] on {3}{4}{5}".format(
+            claim.work_id,
+            claim.agent_runtime,
+            claim_activity(claim, stale_after_minutes),
+            claim.branch,
+            " via {0}".format(claim.workspace_id) if getattr(claim, "workspace_id", None) else "",
+            " in {0}".format(claim.worktree) if claim.worktree else "",
+        )
         for claim in list(claims)[:5]
     ]
 

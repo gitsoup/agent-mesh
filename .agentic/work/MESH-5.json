@@ -4,7 +4,7 @@
   "title": "Fix concurrent work item creation race",
   "description": "Fix concurrent work item creation race",
   "kind": "feature",
-  "status": "ready",
+  "status": "in_progress",
   "execution": "afk_safe",
   "module": "state",
   "planning": {

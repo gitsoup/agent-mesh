@@ -15,6 +15,8 @@ AGENTS.md
 ```
 
 Do not hand-author divergent versions for each tool. Generate them from templates and shared metadata.
+Adapter entrypoints should point agents to `AGENTS.md` first so repo-mode
+detection happens before a tool-specific skill or workflow is chosen.
 
 ## 3. Required adapters for v0.1
 

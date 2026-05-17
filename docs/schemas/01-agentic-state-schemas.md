@@ -18,7 +18,10 @@ Use Pydantic models in implementation and JSON files in target repos.
     "strategy": "git_files",
     "work_dir": ".agentic/work",
     "claims_dir": ".agentic/claims",
-    "reviews_dir": ".agentic/reviews"
+    "reviews_dir": ".agentic/reviews",
+    "worktree_policy": "required",
+    "worktree_root": null,
+    "claim_stale_after_minutes": 120
   },
   "adapters": ["generic", "codex", "claude"],
   "runner": {
@@ -72,11 +75,20 @@ Use Pydantic models in implementation and JSON files in target repos.
   "agent_runtime": "codex",
   "role": "implementer",
   "machine": "karthick-laptop",
+  "workspace_id": "codex-karthick-laptop",
   "worktree": "../example-project-codex",
   "branch": "feat/APP-1-auth-endpoint",
   "claimed_at": "2026-05-17T00:00:00Z",
   "last_seen": "2026-05-17T00:00:00Z",
-  "evidence": []
+  "evidence": [],
+  "events": [
+    {
+      "action": "claimed",
+      "at": "2026-05-17T00:00:00Z",
+      "by": "agent:codex:karthick-laptop",
+      "note": null
+    }
+  ]
 }
 ```
 
@@ -139,6 +151,11 @@ Claim statuses:
 ```text
 in_progress -> stale -> completed -> archived
 ```
+
+Notes:
+
+- `workspace_id` identifies the reusable agent lane or workspace.
+- Safe takeover should normally keep the same branch and assign a new `workspace_id` and worktree.
 
 Review statuses:
 

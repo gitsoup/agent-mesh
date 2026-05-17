@@ -11,7 +11,10 @@
     "strategy": "git_files",
     "work_dir": ".agentic/work",
     "claims_dir": ".agentic/claims",
-    "reviews_dir": ".agentic/reviews"
+    "reviews_dir": ".agentic/reviews",
+    "worktree_policy": "required",
+    "worktree_root": null,
+    "claim_stale_after_minutes": 120
   },
   "adapters": [
     "generic",

@@ -21,6 +21,9 @@ class CoordinationConfig(BaseModel):
     work_dir: str = ".agentic/work"
     claims_dir: str = ".agentic/claims"
     reviews_dir: str = ".agentic/reviews"
+    worktree_policy: str = "required"
+    worktree_root: Optional[str] = None
+    claim_stale_after_minutes: int = 120
 
 
 class RunnerConfig(BaseModel):

@@ -29,6 +29,7 @@ Configure the target repo for Agent Mesh.
 
 Responsibilities:
 
+- Detect repo mode: `greenfield`, `brownfield adoption`, or `ongoing coordination`.
 - Detect repo type and languages where possible.
 - Ask for planning provider: local, GitHub, Linear, Jira future, none.
 - Ask for agent adapters: generic, Claude, Codex, Cursor, OpenCode, Pi, Windsurf.
@@ -36,6 +37,9 @@ Responsibilities:
 - Ask whether dashboard should be generated.
 - Create `.agentic/` state and context files.
 - Generate `AGENTS.md` and adapter files.
+- Route greenfield repos into `/align`, `/to-prd`, and `/to-tasks`.
+- Route brownfield repos into context derivation and normalization before task creation.
+- Refuse to overwrite usable Mesh state without explicit confirmation.
 
 ## 2. /align
 
@@ -105,11 +109,14 @@ Claim a ready work item.
 
 Responsibilities:
 
+- Confirm the repo is already in ongoing-coordination mode before claiming work.
+- Inspect current status, claims, reviews, and handoffs first.
 - Validate work item exists and is `ready`.
 - Check existing claims.
+- Create or verify a dedicated worktree and task branch unless explicitly disabled.
 - Create a claim file.
-- Create or verify branch name.
-- Optionally create/check worktree.
+- Resume an existing claim when the same task is being continued by a new session.
+- Take over a stale claim explicitly instead of deleting it.
 - Commit and push claim if git remote is configured.
 - Update status to `in_progress`.
 

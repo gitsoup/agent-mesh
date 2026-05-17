@@ -6,6 +6,35 @@ You are building **agent-mesh**, a git-native coordination toolkit for parallel 
 
 Agent Mesh turns a normal git repository into a coordinated workspace for humans and AI coding agents. It does not replace coding agents, issue trackers, or CI. It provides the repo protocol, CLI/TUI, workflow skills, adapters, and local automation needed for many agents to work safely in one repo.
 
+## Startup behavior
+
+Every fresh Claude or Codex session should determine repo mode before choosing a workflow.
+
+Inspect these signals first, in order:
+
+1. `AGENTS.md`
+2. `.agentic/context/CONTEXT.md`
+3. `.agentic/context/CONTEXT-MAP.md`
+4. `.agentic/project.json` if present
+5. Current coordination state via `mesh status` when the CLI is available, otherwise inspect `.agentic/work/`, `.agentic/claims/`, `.agentic/reviews/`, and `.agentic/handoffs/`
+
+Route into one of these modes:
+
+- `greenfield`: no meaningful product code/docs yet, and no established coordination state. Start with `/align`, then `/to-prd`, then `/to-tasks`. Use `/setup` only when Agent Mesh has not been initialized yet.
+- `brownfield adoption`: repo has meaningful code/docs/conventions but lacks usable Mesh coordination state. Start with `/setup`, derive durable context from existing artifacts, normalize that context into Mesh state, then continue with `/align`, `/to-prd`, `/to-tasks`, and `/triage` as needed.
+- `ongoing coordination`: `.agentic/` already exists with active or historical work state. Inspect tasks, claims, reviews, and handoffs first. Continue existing work when possible; otherwise claim a ready task and proceed with `/implement`, `/pr`, `/review`, `/address`, `/merge`, or `/handoff`.
+
+Guardrails:
+
+- Do not overwrite existing `.agentic/` state just because `/setup` exists.
+- Do not claim work until you have checked for active claims and reviewed the current coordination state.
+- Prefer the most coordinated mode already supported by repo state. If `.agentic/` is present, treat the repo as ongoing coordination unless the state is clearly incomplete and the user wants adoption repair.
+- Claims should use a dedicated worktree and task branch unless the project explicitly disables worktree isolation.
+- Worktree names should follow reusable workspace or lane identity; branch names should remain task-oriented.
+- If a claim already exists, resume it explicitly or take it over when it is stale; do not delete claim files as a normal recovery mechanism.
+- Safe takeover means: keep the task branch, allocate a new workspace by default, and only carry committed branch history into the new worktree.
+- Do not implement claimed work from the shared repo checkout when worktree isolation is enabled.
+
 ## Primary docs to read
 
 Read these first, in order:

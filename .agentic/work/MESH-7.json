@@ -1,0 +1,27 @@
+{
+  "schema_version": "0.1",
+  "id": "MESH-7",
+  "title": "Design mesh/state coordination branch and worktree topology",
+  "description": "Define how Agent Mesh creates, discovers, and uses a dedicated coordination worktree on the mesh/state branch while keeping the shared root on main.",
+  "kind": "feature",
+  "status": "ready",
+  "execution": "afk_safe",
+  "module": "coordination",
+  "planning": {
+    "provider": "local",
+    "url": null,
+    "external_id": null
+  },
+  "prd": null,
+  "acceptance_criteria": [
+    "Specify how mesh/state is created and located from any worktree",
+    "Define the expected shared root, coordination worktree, and task worktree topology",
+    "Document initialization and recovery behavior when the coordination worktree is missing or stale"
+  ],
+  "dependencies": [
+    "MESH-6"
+  ],
+  "risk": "high",
+  "created_at": "2026-05-17T17:40:00Z",
+  "updated_at": "2026-05-17T17:40:00Z"
+}

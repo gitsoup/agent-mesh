@@ -10,6 +10,12 @@ agents working in one repository.
 - `review packet`: the handoff artifact from implementation to review
 - `adapter`: tool-specific instructions generated from canonical workflows
 - `coordination state`: the human-readable files under `.agentic/`
+- `shared root`: the primary human entrypoint checkout for the repo; it should
+  stay on `main` and be used for coordination, not task implementation
+- `coordination worktree`: a dedicated checkout for the `mesh/state` branch that
+  owns live coordination state
+- `task worktree`: a dedicated checkout for one agent workspace and one task
+  branch
 
 ## Product modes
 
@@ -38,6 +44,37 @@ agents working in one repository.
   explicitly taken over instead of manually deleted
 - `workspace_id` identifies the reusable agent lane or workspace, while the
   branch name identifies the task
+
+## Coordination state model
+
+- Durable repo contract belongs on `main`
+- Live coordination state must be visible before merge from a shared
+  coordination location
+- `main` should hold durable artifacts such as `AGENTS.md`,
+  `.agentic/context/`, ADRs, canonical workflows, adapter templates, and stable
+  work definitions
+- Live coordination state should hold active claims, review packets, handoffs,
+  claim freshness, workspace routing, and runtime task status such as
+  `in_progress` and `pr_open`
+- Agent Mesh should use a dedicated `mesh/state` branch checked out in a
+  coordination worktree for live coordination state
+- Task worktrees should hold code branches only; they should read and write
+  shared coordination state through Mesh commands rather than by owning the
+  authoritative live state files themselves
+- Safe takeover means reusing the task branch while allocating a new
+  `workspace_id` and worktree by default; committed branch history carries
+  forward, uncommitted workspace state does not
+
+## Alignment notes
+
+- The phrase `main repo` was ambiguous because it mixed the durable `main`
+  branch with the human entry checkout; use `shared root` for the human entry
+  checkout and `main` for the durable branch
+- The current branch-local `.agentic` model is not sufficient for a true
+  coordination layer because a shared root on `main` cannot see branch-local
+  live state before merge
+- Future implementation work should prioritize the `mesh/state` coordination
+  model before adding more coordination features on top of branch-local state
 
 ## Current dogfooding notes
 

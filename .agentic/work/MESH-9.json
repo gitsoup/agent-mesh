@@ -1,0 +1,28 @@
+{
+  "schema_version": "0.1",
+  "id": "MESH-9",
+  "title": "Route claim, pr, review, and sync commands through the coordination worktree",
+  "description": "Make live coordination commands resolve, read, and write authoritative state through the mesh/state coordination worktree rather than branch-local files.",
+  "kind": "feature",
+  "status": "ready",
+  "execution": "afk_safe",
+  "module": "cli",
+  "planning": {
+    "provider": "local",
+    "url": null,
+    "external_id": null
+  },
+  "prd": null,
+  "acceptance_criteria": [
+    "mesh claim writes live claim state through the coordination worktree",
+    "mesh pr and mesh review resolve review packets and runtime state from the coordination worktree",
+    "mesh sync can summarize live state from the shared root without checking out feature branches"
+  ],
+  "dependencies": [
+    "MESH-7",
+    "MESH-8"
+  ],
+  "risk": "high",
+  "created_at": "2026-05-17T17:40:00Z",
+  "updated_at": "2026-05-17T17:40:00Z"
+}

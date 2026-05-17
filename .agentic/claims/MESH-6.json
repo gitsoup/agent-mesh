@@ -1,7 +1,7 @@
 {
   "schema_version": "0.1",
   "work_id": "MESH-6",
-  "status": "in_progress",
+  "status": "completed",
   "claimed_by": "agent:codex:C02F80M5ML85",
   "agent_runtime": "codex",
   "role": "implementer",
@@ -10,7 +10,7 @@
   "worktree": "/Users/karthick/projects/agent-mesh-mesh-6",
   "branch": "feat/MESH-6-design-repo-mode-detection-and-startup-routing",
   "claimed_at": "2026-05-17T13:13:57Z",
-  "last_seen": "2026-05-17T16:36:21Z",
+  "last_seen": "2026-05-17T17:45:00Z",
   "evidence": [],
   "events": [
     {
@@ -18,6 +18,12 @@
       "at": "2026-05-17T16:36:21Z",
       "by": "agent:codex:C02F80M5ML85",
       "note": null
+    },
+    {
+      "action": "completed",
+      "at": "2026-05-17T17:45:00Z",
+      "by": "agent:codex:C02F80M5ML85",
+      "note": "Merged directly to main without opening a GitHub PR"
     }
   ]
 }

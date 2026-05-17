@@ -1,0 +1,147 @@
+# Agentic State Schemas
+
+Use Pydantic models in implementation and JSON files in target repos.
+
+## 1. Project config: `.agentic/project.json`
+
+```json
+{
+  "schema_version": "0.1",
+  "project_name": "example-project",
+  "project_key": "APP",
+  "default_branch": "main",
+  "planning": {
+    "provider": "local",
+    "external_project": null
+  },
+  "coordination": {
+    "strategy": "git_files",
+    "work_dir": ".agentic/work",
+    "claims_dir": ".agentic/claims",
+    "reviews_dir": ".agentic/reviews"
+  },
+  "adapters": ["generic", "codex", "claude"],
+  "runner": {
+    "default": "local_manual"
+  },
+  "dashboard": {
+    "enabled": true,
+    "output_dir": ".agentic/dashboard"
+  }
+}
+```
+
+## 2. Work item: `.agentic/work/APP-1.json`
+
+```json
+{
+  "schema_version": "0.1",
+  "id": "APP-1",
+  "title": "Implement auth endpoint",
+  "description": "Add an endpoint that lets users request an email sign-in link.",
+  "kind": "feature",
+  "status": "ready",
+  "execution": "afk_safe",
+  "module": "api",
+  "planning": {
+    "provider": "local",
+    "url": null,
+    "external_id": null
+  },
+  "prd": null,
+  "acceptance_criteria": [
+    "Endpoint validates email input",
+    "Endpoint returns success response without leaking account existence",
+    "Tests cover valid and invalid inputs"
+  ],
+  "dependencies": [],
+  "risk": "medium",
+  "created_at": "2026-05-17T00:00:00Z",
+  "updated_at": "2026-05-17T00:00:00Z"
+}
+```
+
+## 3. Claim: `.agentic/claims/APP-1.json`
+
+```json
+{
+  "schema_version": "0.1",
+  "work_id": "APP-1",
+  "status": "in_progress",
+  "claimed_by": "agent:codex:karthick-laptop",
+  "agent_runtime": "codex",
+  "role": "implementer",
+  "machine": "karthick-laptop",
+  "worktree": "../example-project-codex",
+  "branch": "feat/APP-1-auth-endpoint",
+  "claimed_at": "2026-05-17T00:00:00Z",
+  "last_seen": "2026-05-17T00:00:00Z",
+  "evidence": []
+}
+```
+
+## 4. Evidence item
+
+```json
+{
+  "kind": "test",
+  "command": "pytest tests/api/test_auth.py",
+  "result": "passed",
+  "summary": "6 tests passed",
+  "created_at": "2026-05-17T00:00:00Z"
+}
+```
+
+## 5. Review packet: `.agentic/reviews/PR-12.json`
+
+```json
+{
+  "schema_version": "0.1",
+  "type": "review_request",
+  "id": "PR-12",
+  "work_id": "APP-1",
+  "pr": {
+    "number": 12,
+    "url": "https://github.com/org/repo/pull/12",
+    "branch": "feat/APP-1-auth-endpoint",
+    "base": "main"
+  },
+  "author": {
+    "agent_runtime": "codex",
+    "role": "implementer"
+  },
+  "requested_role": "reviewer",
+  "context": {
+    "work_item": ".agentic/work/APP-1.json",
+    "claim": ".agentic/claims/APP-1.json",
+    "prd": null,
+    "context_files": [".agentic/context/CONTEXT.md"]
+  },
+  "evidence": [],
+  "status": "pending_review",
+  "created_at": "2026-05-17T00:00:00Z"
+}
+```
+
+## 6. Status lifecycle
+
+Work item statuses:
+
+```text
+needs_triage -> needs_info -> ready -> in_progress -> pr_open -> done
+                         \-> blocked
+                         \-> human_only
+                         \-> wontfix
+```
+
+Claim statuses:
+
+```text
+in_progress -> stale -> completed -> archived
+```
+
+Review statuses:
+
+```text
+pending_review -> in_review -> changes_requested -> approved -> resolved
+```

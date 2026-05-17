@@ -1,0 +1,28 @@
+{
+  "schema_version": "0.1",
+  "project_name": "agent-mesh",
+  "project_key": "MESH",
+  "default_branch": "main",
+  "planning": {
+    "provider": "local",
+    "external_project": null
+  },
+  "coordination": {
+    "strategy": "git_files",
+    "work_dir": ".agentic/work",
+    "claims_dir": ".agentic/claims",
+    "reviews_dir": ".agentic/reviews"
+  },
+  "adapters": [
+    "generic",
+    "codex",
+    "claude"
+  ],
+  "runner": {
+    "default": "local_manual"
+  },
+  "dashboard": {
+    "enabled": true,
+    "output_dir": ".agentic/dashboard"
+  }
+}

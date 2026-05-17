@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agent-mesh"
+version = "0.1.0"
+description = "Git-native coordination toolkit for parallel AI coding agents."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "pydantic>=2.7,<3",
+  "rich>=13.7,<14",
+  "typer>=0.12,<1",
+]
+
+[project.optional-dependencies]
+tui = [
+  "textual>=0.63,<1",
+]
+dev = [
+  "pytest>=8,<9",
+  "ruff>=0.4,<1",
+]
+
+[project.scripts]
+mesh = "agent_mesh.cli:app"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+include = ["agent_mesh*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]

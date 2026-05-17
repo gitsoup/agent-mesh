@@ -1,0 +1,43 @@
+Metadata-Version: 2.4
+Name: agent-mesh
+Version: 0.1.0
+Summary: Git-native coordination toolkit for parallel AI coding agents.
+Requires-Python: >=3.11
+Description-Content-Type: text/markdown
+Requires-Dist: pydantic<3,>=2.7
+Requires-Dist: rich<14,>=13.7
+Requires-Dist: typer<1,>=0.12
+Provides-Extra: tui
+Requires-Dist: textual<1,>=0.63; extra == "tui"
+Provides-Extra: dev
+Requires-Dist: pytest<9,>=8; extra == "dev"
+Requires-Dist: ruff<1,>=0.4; extra == "dev"
+
+# Agent Mesh
+
+Agent Mesh is a git-native coordination toolkit for running multiple AI coding
+agents and humans safely in one repository.
+
+The repository is still in early implementation. The current focus is the v0.1
+local-first scaffold described in [AGENTS.md](./AGENTS.md) and the planning docs
+under [docs/](./docs).
+
+## Current status
+
+The project now includes:
+
+- a Python package scaffold
+- a `mesh` CLI entrypoint
+- initial Pydantic config/state models
+- baseline tests for installability and config/state validation
+
+## Development
+
+Create a virtualenv, install the package in editable mode, and run tests:
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -e .[dev]
+pytest
+```

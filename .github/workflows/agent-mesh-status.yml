@@ -1,0 +1,15 @@
+name: agent-mesh-status
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  status:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Show Agent Mesh state
+        run: |
+          test -d .agentic || exit 0
+          find .agentic -maxdepth 2 -type f | sort

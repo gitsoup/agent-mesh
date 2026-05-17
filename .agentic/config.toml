@@ -1,0 +1,6 @@
+schema_version = "0.1"
+project_name = "agent-mesh"
+project_key = "MESH"
+default_branch = "main"
+provider = "local"
+dashboard_enabled = true

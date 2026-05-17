@@ -1,0 +1,25 @@
+{
+  "schema_version": "0.1",
+  "id": "MESH-1",
+  "title": "Define ongoing coordination model for active Mesh repos",
+  "description": "Define ongoing coordination model for active Mesh repos",
+  "kind": "feature",
+  "status": "ready",
+  "execution": "afk_safe",
+  "module": "coordination",
+  "planning": {
+    "provider": "local",
+    "url": null,
+    "external_id": null
+  },
+  "prd": null,
+  "acceptance_criteria": [
+    "Define startup behavior when .agentic already exists",
+    "Specify how agents should inspect active tasks, claims, and reviews",
+    "Document continuation and handoff expectations"
+  ],
+  "dependencies": [],
+  "risk": "medium",
+  "created_at": "2026-05-17T12:27:30Z",
+  "updated_at": "2026-05-17T12:27:30Z"
+}

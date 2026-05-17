@@ -23,7 +23,7 @@ SUPPORTED_ADAPTERS = ["generic", "claude", "codex", "cursor", "opencode", "pi", 
 
 
 def emit(message: str) -> None:
-    if console is not None:
+    if console is not None and console.is_terminal:
         console.print(message, markup=False)
         return
     print(message)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Any, Iterable, List, Type, TypeVar
@@ -18,6 +19,17 @@ def resolve_repo_root(start: Path) -> Path:
     current = start.resolve()
     for candidate in (current, *current.parents):
         if (candidate / ".git").exists():
+            common_dir = subprocess.run(
+                ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
+                cwd=candidate,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            if common_dir.returncode == 0:
+                common_dir_path = Path(common_dir.stdout.strip())
+                if common_dir_path.name == ".git":
+                    return common_dir_path.parent
             return candidate
     raise FileNotFoundError("Could not find a git repository root from the given path.")
 

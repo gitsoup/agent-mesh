@@ -1,4 +1,5 @@
 import json
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -29,6 +30,21 @@ def test_resolve_repo_root_finds_git_ancestor(tmp_path: Path) -> None:
 def test_resolve_repo_root_raises_when_git_root_missing(tmp_path: Path) -> None:
     with pytest.raises(FileNotFoundError):
         resolve_repo_root(tmp_path)
+
+
+def test_resolve_repo_root_uses_primary_worktree_for_linked_worktree(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    linked_worktree = tmp_path / "repo-linked"
+    repo_root.mkdir(parents=True)
+    subprocess.run(["git", "init", "-b", "main"], cwd=repo_root, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.email", "mesh@example.com"], cwd=repo_root, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.name", "Agent Mesh Tests"], cwd=repo_root, check=True, capture_output=True)
+    (repo_root / "README.md").write_text("demo\n", encoding="utf-8")
+    subprocess.run(["git", "add", "README.md"], cwd=repo_root, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "initial"], cwd=repo_root, check=True, capture_output=True)
+    subprocess.run(["git", "worktree", "add", str(linked_worktree)], cwd=repo_root, check=True, capture_output=True)
+
+    assert resolve_repo_root(linked_worktree) == repo_root
 
 
 def test_validate_state_tree_accepts_valid_project_file(tmp_path: Path) -> None:

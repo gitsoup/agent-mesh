@@ -136,7 +136,7 @@ def test_doctor_status_and_task_lifecycle(tmp_path: Path, monkeypatch, capsys) -
     assert "Tasks: 1" in output
     assert "in_progress: 1" in output
     assert "Claims: 1" in output
-    assert "APP-1: codex on feat/APP-1-implement-auth-endpoint" in output
+    assert "APP-1: codex [active] on feat/APP-1-implement-auth-endpoint" in output
 
     exit_code, output = run_cli(["pr", "--dry-run", "--work-id", "APP-1"], capsys)
     assert exit_code == 0

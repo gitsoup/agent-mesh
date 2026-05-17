@@ -47,6 +47,12 @@ def test_init_creates_agentic_scaffold(tmp_path: Path, monkeypatch, capsys) -> N
     assert (repo_root / ".agents/skills/claim/SKILL.md").exists()
     assert (repo_root / ".claude/skills/claim/SKILL.md").exists()
     assert (repo_root / ".github/workflows/agent-mesh-status.yml").exists()
+    assert (repo_root / ".agents/skills/claim/SKILL.md").read_text(encoding="utf-8").startswith(
+        "---\nname: claim\n"
+    )
+    assert (repo_root / ".claude/skills/claim/SKILL.md").read_text(encoding="utf-8").startswith(
+        "---\nname: claim\n"
+    )
 
 
 def test_init_rerun_skips_existing_files_without_force(tmp_path: Path, monkeypatch, capsys) -> None:

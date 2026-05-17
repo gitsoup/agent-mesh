@@ -356,7 +356,7 @@ def install_skill_wrapper(base_dir: Path, force: bool) -> InitResult:
         record_result(
             write_text(
                 skill_dir / "SKILL.md",
-                "Read `AGENTS.md`, use its repo-mode detection, then follow `.agentic/workflows/{0}.md`.\n".format(skill.name),
+                render_skill_wrapper(skill),
                 force=force,
             ),
             created,
@@ -469,6 +469,16 @@ description: {1}
 ---
 
 Read `AGENTS.md` first, use its repo-mode detection, then follow `.agentic/workflows/{0}.md`.
+""".format(skill.name, skill.summary)
+
+
+def render_skill_wrapper(skill: SkillDefinition) -> str:
+    return """---
+name: {0}
+description: {1}
+---
+
+Read `AGENTS.md`, use its repo-mode detection, then follow `.agentic/workflows/{0}.md`.
 """.format(skill.name, skill.summary)
 
 

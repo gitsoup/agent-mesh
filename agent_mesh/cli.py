@@ -133,6 +133,12 @@ def build_parser() -> argparse.ArgumentParser:
     review_parser.add_argument("--work-id", required=True)
     review_parser.set_defaults(func=handle_review_packet)
 
+    review_route_parser = subparsers.add_parser(
+        "review", help="Resolve a review packet to the correct workspace."
+    )
+    review_route_parser.add_argument("target")
+    review_route_parser.set_defaults(func=handle_review)
+
     dashboard_parser = subparsers.add_parser("dashboard", help="Dashboard commands.")
     dashboard_subparsers = dashboard_parser.add_subparsers(dest="dashboard_command")
     dashboard_build_parser = dashboard_subparsers.add_parser(
@@ -419,6 +425,45 @@ def handle_review_packet(args: argparse.Namespace) -> int:
     return 0
 
 
+def handle_review(args: argparse.Namespace) -> int:
+    from agent_mesh.state.models import Claim, ReviewPacket, WorkItem
+    from agent_mesh.state.storage import load_model, resolve_repo_root
+
+    repo_root = resolve_repo_root(Path.cwd())
+    review_path = resolve_review_packet_path(repo_root, args.target)
+    if review_path is None:
+        emit("ERROR: could not find review packet for {0}".format(args.target))
+        return 1
+
+    review_packet = load_model(review_path, ReviewPacket)
+    claim = load_model(repo_root / review_packet.context.claim, Claim)
+    work_item = load_model(repo_root / review_packet.context.work_item, WorkItem)
+    current_path = Path.cwd().resolve()
+    target_worktree = Path(claim.worktree).resolve() if claim.worktree else None
+
+    emit("Review packet: {0}".format(review_packet.id))
+    emit("Work item: {0} ({1})".format(work_item.id, work_item.title))
+    emit("Branch: {0} -> {1}".format(review_packet.pr.branch, review_packet.pr.base))
+    emit("Requested role: {0}".format(review_packet.requested_role))
+    emit("Workspace: {0}".format(claim.workspace_id or "unspecified"))
+    emit("Worktree: {0}".format(claim.worktree or "shared repo"))
+    emit("Current path: {0}".format(current_path))
+    emit("Review status: {0}".format(review_packet.status))
+
+    for context_file in review_packet.context.context_files:
+        emit("Context: {0}".format(context_file))
+
+    if target_worktree is not None and current_path != target_worktree:
+        emit("Resolved workspace differs from the current path.")
+        emit("Next: cd {0}".format(target_worktree))
+        emit("Then: mesh review {0}".format(review_packet.id))
+        return 0
+
+    emit("Current path matches the resolved review workspace.")
+    emit("Next: inspect the diff and review against the task contract.")
+    return 0
+
+
 def handle_dashboard_build(_: argparse.Namespace) -> int:
     from agent_mesh.config import load_project_config
     from agent_mesh.state.storage import list_claims, list_reviews, list_work_items, resolve_repo_root
@@ -454,6 +499,17 @@ def derive_project_key(project_name: str) -> str:
 
 def parse_csv(raw: str) -> List[str]:
     return [item.strip() for item in raw.split(",") if item.strip()]
+
+
+def resolve_review_packet_path(repo_root: Path, target: str) -> Optional[Path]:
+    candidates = [
+        repo_root / ".agentic/reviews" / "{0}.json".format(target),
+        repo_root / ".agentic/reviews" / "PR-{0}.json".format(target),
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return None
 
 
 def parse_utc(raw: str) -> datetime:

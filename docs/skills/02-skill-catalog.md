@@ -181,6 +181,8 @@ Review a PR or review packet.
 
 Responsibilities:
 
+- Resolve the review packet to the claimed workspace before reviewing.
+- Warn or redirect when the current checkout does not match the claimed worktree.
 - Read PRD/task/claim/context/ADRs.
 - Inspect changed files.
 - Compare implementation to acceptance criteria.

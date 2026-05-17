@@ -144,12 +144,14 @@ Input: PR number or review packet.
 
 Steps:
 
-1. Read review packet.
-2. Read task, PRD, context, ADRs.
-3. Inspect diff.
-4. Check acceptance criteria.
-5. Check tests, risks, security, maintainability.
-6. Produce structured review.
+1. Resolve the review packet to its claim, branch, and claimed workspace.
+2. If the current path does not match the claimed workspace, switch to the resolved worktree first.
+3. Read review packet.
+4. Read task, PRD, context, ADRs.
+5. Inspect diff.
+6. Check acceptance criteria.
+7. Check tests, risks, security, maintainability.
+8. Produce structured review.
 
 ## /address
 

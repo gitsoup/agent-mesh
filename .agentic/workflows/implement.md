@@ -2,6 +2,11 @@
 
 Implement the claimed task safely.
 
+In `ongoing coordination` mode, treat `/implement` as task-oriented by default.
+If the user says `implement`, `continue`, `what next`, or similar without
+naming a narrower topic, resolve the request against current work items,
+claims, reviews, and handoffs before proceeding.
+
 ## Steps
 
 1. Read the work item, claim, PRD, context, and ADRs.

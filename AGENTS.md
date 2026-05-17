@@ -29,6 +29,8 @@ Guardrails:
 - Do not overwrite existing `.agentic/` state just because `/setup` exists.
 - Do not claim work until you have checked for active claims and reviewed the current coordination state.
 - Prefer the most coordinated mode already supported by repo state. If `.agentic/` is present, treat the repo as ongoing coordination unless the state is clearly incomplete and the user wants adoption repair.
+- In `ongoing coordination` mode, ambiguous execution requests such as `implement`, `continue`, `what next`, `work on this`, or `pick the next task` must be resolved against Agent Mesh coordination state first, not the most recent conversational subtopic.
+- For those ambiguous execution requests, inspect `.agentic/work/`, `.agentic/claims/`, `.agentic/reviews/`, and `.agentic/handoffs/` before proposing or starting work unless the user explicitly names a narrower scope.
 - Claims should use a dedicated worktree and task branch unless the project explicitly disables worktree isolation.
 - Worktree names should follow reusable workspace or lane identity; branch names should remain task-oriented.
 - If a claim already exists, resume it explicitly or take it over when it is stale; do not delete claim files as a normal recovery mechanism.

@@ -7,12 +7,17 @@ Claim a ready work item and prepare implementation context.
 1. Confirm the repo is in `ongoing coordination` mode, or finish setup/adoption
    work first.
 2. Inspect current status, claims, reviews, and handoffs.
-3. Validate the work item.
-4. Check for an existing claim.
-5. Create or verify a dedicated worktree and task branch unless worktree
+3. If the user request is ambiguous, such as `implement`, `continue`, `what
+   next`, `work on this`, or `pick the next task`, resolve it against Agent
+   Mesh coordination state first instead of the latest conversational topic.
+4. When multiple ready tasks exist and the user did not name one, recommend the
+   best unclaimed task that most directly unlocks dependent work.
+5. Validate the work item.
+6. Check for an existing claim.
+7. Create or verify a dedicated worktree and task branch unless worktree
    isolation is explicitly disabled by project config.
-6. Create the claim file.
-7. Output the next implementation steps, including the worktree path to enter.
+8. Create the claim file.
+9. Output the next implementation steps, including the worktree path to enter.
 
 ## Recovery
 

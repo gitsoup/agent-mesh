@@ -111,6 +111,8 @@ Responsibilities:
 
 - Confirm the repo is already in ongoing-coordination mode before claiming work.
 - Inspect current status, claims, reviews, and handoffs first.
+- Resolve ambiguous execution requests such as `implement`, `continue`, `what next`, or `work on this` against coordination state first unless the user explicitly names a narrower scope.
+- When multiple ready tasks exist and no task is named, recommend the best unclaimed task that most directly unlocks dependent work.
 - Validate work item exists and is `ready`.
 - Check existing claims.
 - Create or verify a dedicated worktree and task branch unless explicitly disabled.
@@ -126,6 +128,7 @@ Implement the claimed task safely.
 
 Responsibilities:
 
+- Treat `/implement` as task-oriented by default in ongoing-coordination mode, not as a continuation of the latest conversational subtopic.
 - Read task, claim, PRD, context, and relevant ADRs.
 - Use tests and feedback loops.
 - Prefer vertical slices.

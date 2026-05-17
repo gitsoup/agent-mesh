@@ -163,6 +163,7 @@ def init_repo(
         repo_root / ".agentic/context/adr",
         repo_root / ".agentic/work",
         repo_root / ".agentic/claims",
+        repo_root / ".agentic/claims/archive",
         repo_root / ".agentic/reviews",
         repo_root / ".agentic/handoffs",
         repo_root / ".agentic/workflows",
@@ -229,6 +230,15 @@ def init_repo(
             created,
             skipped,
         )
+    record_result(
+        write_text(
+            repo_root / ".agentic/claims/archive/README.md",
+            "# Archived Claims\n\nThis directory stores completed or superseded claim records.\n",
+            force=force,
+        ),
+        created,
+        skipped,
+    )
 
     for skill in SKILLS:
         record_result(

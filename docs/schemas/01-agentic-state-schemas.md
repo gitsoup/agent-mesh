@@ -156,6 +156,9 @@ Notes:
 
 - `workspace_id` identifies the reusable agent lane or workspace.
 - Safe takeover should normally keep the same branch and assign a new `workspace_id` and worktree.
+- Active claims live under `.agentic/claims/`.
+- Completed or superseded claims should move to `.agentic/claims/archive/` so
+  active status only reflects current ownership.
 
 Review statuses:
 

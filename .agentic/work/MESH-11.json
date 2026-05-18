@@ -1,0 +1,25 @@
+{
+  "schema_version": "0.1",
+  "id": "MESH-11",
+  "title": "mesh status should rebuild the dashboard",
+  "description": "Running `mesh status` reads and prints current coordination state but does not rebuild the dashboard HTML. The dashboard can therefore show stale data after work items, claims, or reviews are updated. The fix is to trigger `handle_dashboard_build` at the end of `handle_status` when `config.dashboard.enabled` is true.",
+  "kind": "bug",
+  "status": "ready",
+  "execution": "afk_safe",
+  "module": "cli",
+  "planning": {
+    "provider": "local",
+    "url": null,
+    "external_id": null
+  },
+  "prd": null,
+  "acceptance_criteria": [
+    "`mesh status` rebuilds `.agentic/dashboard/index.html` when dashboard is enabled",
+    "Dashboard reflects current work item, claim, and review state immediately after `mesh status` runs",
+    "No regression in existing `mesh status` output or test suite"
+  ],
+  "dependencies": [],
+  "risk": "low",
+  "created_at": "2026-05-18T19:20:00Z",
+  "updated_at": "2026-05-18T19:20:00Z"
+}

@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>agent-mesh Agent Mesh Dashboard</title>
+    <style>
+      body { font-family: sans-serif; margin: 2rem auto; max-width: 960px; line-height: 1.5; }
+      .meta { color: #555; }
+      .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1.5rem; }
+      .panel { border: 1px solid #ddd; border-radius: 10px; padding: 1rem; }
+      code { background: #f3f3f3; padding: 0.1rem 0.3rem; border-radius: 4px; }
+    </style>
+  </head>
+  <body>
+    <h1>agent-mesh Agent Mesh Dashboard</h1>
+    <p class="meta">Project key: <code>MESH</code></p>
+    <div class="grid">
+      <section class="panel">
+        <h2>Task Summary</h2>
+        <ul><li>done: 3</li><li>ready: 8</li></ul>
+      </section>
+      <section class="panel">
+        <h2>Active Claims</h2>
+        <ul><li>None</li></ul>
+      </section>
+      <section class="panel">
+        <h2>Pending Reviews</h2>
+        <ul><li>PR-MESH-1 [merged]</li></ul>
+      </section>
+    </div>
+    <section class="panel">
+      <h2>Task Details</h2>
+      <ul><li>MESH-1 [done] Define ongoing coordination model for active Mesh repos</li><li>MESH-10 [ready] Add locking and migration safety for shared coordination state writes</li><li>MESH-11 [ready] mesh status should rebuild the dashboard</li><li>MESH-2 [ready] Design init TUI and first-run question flow</li><li>MESH-3 [ready] Design greenfield repo onboarding flow</li><li>MESH-4 [ready] Design brownfield adoption and migration flow</li><li>MESH-5 [ready] Fix concurrent work item creation race</li><li>MESH-6 [done] Design repo-mode detection and startup routing</li><li>MESH-7 [done] Design mesh/state coordination branch and worktree topology</li><li>MESH-8 [ready] Split durable work definitions from live runtime task state</li><li>MESH-9 [ready] Route claim, pr, review, and sync commands through the coordination worktree</li></ul>
+    </section>
+  </body>
+</html>

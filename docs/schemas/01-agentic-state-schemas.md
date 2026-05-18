@@ -100,7 +100,7 @@ Use Pydantic models in implementation and JSON files in target repos.
 ```json
 {
   "kind": "test",
-  "command": "pytest tests/api/test_auth.py",
+  "command": "uv run pytest tests/api/test_auth.py",
   "result": "passed",
   "summary": "6 tests passed",
   "created_at": "2026-05-17T00:00:00Z"

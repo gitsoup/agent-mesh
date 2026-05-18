@@ -13,6 +13,7 @@ tests/
 
 Add dependencies:
 
+- uv
 - typer
 - rich
 - textual optional
@@ -139,9 +140,7 @@ Write README with:
 In a temp directory:
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -e .
+uv sync
 mkdir /tmp/demo-agent-mesh && cd /tmp/demo-agent-mesh
 git init
 mesh init --project-name demo --project-key APP --provider local --adapters generic,codex,claude --yes

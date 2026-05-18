@@ -19,7 +19,14 @@ The project now includes:
 
 ## Development
 
-Create a virtualenv, install the package in editable mode, and run tests:
+Use `uv` for local development and agent execution:
+
+```bash
+uv sync --extra dev
+uv run pytest
+```
+
+Fallback if `uv` is unavailable:
 
 ```bash
 python -m venv .venv

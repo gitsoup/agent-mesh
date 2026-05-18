@@ -411,14 +411,15 @@ def handle_pr(args: argparse.Namespace) -> int:
     emit(body)
 
     review_packet = create_review_packet(config, work_item, claim)
-    save_model_json(repo_root / ".agentic/reviews" / "{0}.json".format(review_packet.id), review_packet)
+    review_packet_path = repo_root / ".agentic/reviews" / "{0}.json".format(review_packet.id)
+    save_model_json(review_packet_path, review_packet)
 
     work_item.status = "pr_open"
     work_item.updated_at = utc_now()
     save_model_json(repo_root / ".agentic/work" / "{0}.json".format(args.work_id), work_item)
 
     if args.dry_run:
-        emit("Dry-run: review packet written to .agentic/reviews/{0}.json".format(review_packet.id))
+        emit("Dry-run: review packet written to {0}".format(review_packet_path))
     return 0
 
 
@@ -432,8 +433,9 @@ def handle_review_packet(args: argparse.Namespace) -> int:
     work_item = load_model(repo_root / ".agentic/work" / "{0}.json".format(args.work_id), WorkItem)
     claim = load_model(repo_root / ".agentic/claims" / "{0}.json".format(args.work_id), Claim)
     review_packet = create_review_packet(config, work_item, claim)
-    save_model_json(repo_root / ".agentic/reviews" / "{0}.json".format(review_packet.id), review_packet)
-    emit("Wrote review packet {0}".format(review_packet.id))
+    review_packet_path = repo_root / ".agentic/reviews" / "{0}.json".format(review_packet.id)
+    save_model_json(review_packet_path, review_packet)
+    emit("Wrote review packet {0}".format(review_packet_path))
     return 0
 
 

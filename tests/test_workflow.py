@@ -252,6 +252,60 @@ def test_claim_creates_dedicated_worktree_when_required(tmp_path: Path, monkeypa
     assert "via {0}".format(claim["workspace_id"]) in output
 
 
+def test_pr_dry_run_reports_review_packet_path_from_task_worktree(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    repo_root = tmp_path / "demo-repo"
+    repo_root.mkdir(parents=True)
+    subprocess.run(["git", "init", "-b", "main"], cwd=repo_root, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "config", "user.email", "mesh@example.com"],
+        cwd=repo_root,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Agent Mesh Tests"],
+        cwd=repo_root,
+        check=True,
+        capture_output=True,
+    )
+    (repo_root / "README.md").write_text("demo\n", encoding="utf-8")
+    subprocess.run(["git", "add", "README.md"], cwd=repo_root, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "initial"], cwd=repo_root, check=True, capture_output=True)
+    monkeypatch.chdir(repo_root)
+
+    exit_code, _ = run_cli(
+        [
+            "init",
+            "--project-name",
+            "demo",
+            "--project-key",
+            "APP",
+            "--provider",
+            "local",
+            "--adapters",
+            "generic,codex,claude",
+            "--worktree-policy",
+            "required",
+            "--yes",
+        ],
+        capsys,
+    )
+    assert exit_code == 0
+    assert run_cli(["task", "add", "Implement auth endpoint", "--module", "api"], capsys)[0] == 0
+    assert run_cli(["claim", "APP-1", "--agent", "codex", "--role", "implementer"], capsys)[0] == 0
+
+    claim = json.loads((repo_root / ".agentic/claims/APP-1.json").read_text(encoding="utf-8"))
+    monkeypatch.chdir(Path(claim["worktree"]))
+
+    exit_code, output = run_cli(["pr", "--dry-run", "--work-id", "APP-1"], capsys)
+    assert exit_code == 0
+    expected_path = repo_root / ".agentic/reviews/PR-APP-1.json"
+    assert "Dry-run: review packet written to {0}".format(expected_path) in output
+    assert expected_path.exists()
+
+
 def test_claim_resume_updates_existing_claim(tmp_path: Path, monkeypatch, capsys) -> None:
     repo_root = init_repo(tmp_path, monkeypatch, capsys)
 

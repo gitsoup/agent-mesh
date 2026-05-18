@@ -49,6 +49,8 @@ def test_init_creates_agentic_scaffold(tmp_path: Path, monkeypatch, capsys) -> N
     assert (repo_root / ".agentic/workflows/ongoing.md").exists()
     ongoing = (repo_root / ".agentic/workflows/ongoing.md").read_text(encoding="utf-8")
     assert "already uses Agent Mesh" in ongoing
+    assert "Startup inspection sequence" in ongoing
+    assert "claim_stale_after_minutes" in ongoing
     assert "handoff" in ongoing
     assert (repo_root / ".agentic/skills/claim/SKILL.md").exists()
     assert (repo_root / ".agents/skills/claim/SKILL.md").exists()

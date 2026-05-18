@@ -121,11 +121,11 @@ WORKFLOW_STEPS: Dict[str, List[str]] = {
         "Rebuild dashboard state.",
     ],
     "ongoing": [
-        "Inspect `.agentic/project.json`, claims, reviews, handoffs, and work items.",
-        "Identify active claims, stale claims, open reviews, and pending handoffs.",
+        "Startup inspection sequence: read `.agentic/project.json`, handoffs, claims, reviews, then work items — in that order.",
+        "Surface any handoff found in `.agentic/handoffs/` before acting on anything else.",
+        "Identify active claims (within `claim_stale_after_minutes` from project.json), stale claims, and open reviews.",
         "Report a compact summary of current coordination state.",
-        "If a handoff exists, surface the continuation note first.",
-        "If an open review exists, resolve the workspace and prompt the user.",
+        "If an open review exists, resolve the workspace and prompt the user before starting new work.",
         "Otherwise, recommend the best ready task or resume in-progress work.",
         "Proceed with `/claim`, `/implement`, `/pr`, `/review`, `/address`, `/merge`, or `/handoff` as appropriate.",
     ],
@@ -437,7 +437,7 @@ This repository uses Agent Mesh for local-first coordination.
 2. Detect repo mode before choosing a workflow:
    - `greenfield`: little or no durable product/code context yet → `/setup`, `/align`, `/to-prd`, `/to-tasks`
    - `brownfield adoption`: meaningful repo context exists, but Mesh state does not → `/setup`
-   - `ongoing coordination`: `.agentic/` already exists with work/claim/review state → `.agentic/workflows/ongoing.md`
+   - `ongoing coordination`: `.agentic/` already exists with work/claim/review state → `/ongoing`
 3. Inspect `.agentic/project.json` and current coordination state before proposing `/setup` or `/claim`.
 4. Use `.agentic/workflows/*.md` as the canonical workflow definitions.
 5. Keep coordination state human-readable and reviewable.

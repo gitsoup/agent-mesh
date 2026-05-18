@@ -12,9 +12,9 @@ When `.agentic/` already exists, inspect in this order before proposing or
 starting any work:
 
 1. `.agentic/project.json` — project key, coordination branch, worktree policy.
-2. `.agentic/claims/` — active and stale claims; identify who owns what.
-3. `.agentic/reviews/` — open review packets awaiting feedback or merge.
-4. `.agentic/handoffs/` — continuation notes from previous sessions.
+2. `.agentic/handoffs/` — continuation notes from previous sessions; surface these before any other state.
+3. `.agentic/claims/` — active and stale claims; identify who owns what.
+4. `.agentic/reviews/` — open review packets awaiting feedback or merge.
 5. `.agentic/work/` — task statuses; identify `ready`, `in_progress`, and `done` items.
 
 Do not propose `/setup` or overwrite existing state unless it is explicitly
@@ -22,10 +22,10 @@ incomplete and the user requests adoption repair.
 
 ## Claim inspection rules
 
-A claim is **active** when its `last_seen` is within `claim_stale_after_minutes`
-(default: 120 minutes) of the current time.
+A claim is **active** when its `last_seen` is within the `claim_stale_after_minutes`
+threshold from `.agentic/project.json` of the current time.
 
-A claim is **stale** when its `last_seen` has exceeded `claim_stale_after_minutes`.
+A claim is **stale** when its `last_seen` has exceeded that threshold.
 
 A claim is **orphaned** when its referenced work item does not exist in
 `.agentic/work/`.

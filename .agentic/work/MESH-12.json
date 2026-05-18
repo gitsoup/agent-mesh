@@ -1,0 +1,27 @@
+{
+  "schema_version": "0.1",
+  "id": "MESH-12",
+  "title": "Remove task worktree and branch on mesh merge",
+  "description": "After a task branch is merged, the task worktree and remote branch become stale. mesh merge should remove the task worktree (git worktree remove) and delete the remote task branch as part of the merge lifecycle, keeping git worktree list clean and preventing dangling branch references.",
+  "kind": "feature",
+  "status": "ready",
+  "execution": "afk_safe",
+  "module": "cli",
+  "planning": {
+    "provider": "local",
+    "url": null,
+    "external_id": null
+  },
+  "prd": null,
+  "acceptance_criteria": [
+    "mesh merge removes the task worktree via git worktree remove after the branch is merged",
+    "mesh merge deletes the remote task branch after the worktree is removed",
+    "mesh merge skips worktree removal gracefully when worktree_policy is off or the worktree path is absent",
+    "The coordination worktree (mesh/state) is never removed by mesh merge",
+    "Claim is archived and work item marked done after cleanup completes"
+  ],
+  "dependencies": [],
+  "risk": "low",
+  "created_at": "2026-05-18T00:00:00Z",
+  "updated_at": "2026-05-18T00:00:00Z"
+}

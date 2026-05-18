@@ -72,6 +72,28 @@ Creation and recovery rules:
 - `mesh status` and `mesh doctor` can only report topology health today; they do
   not yet route claims, reviews, or handoffs through `mesh/state`.
 
+## Task worktree lifecycle
+
+Task worktrees have a different lifecycle from the coordination worktree:
+
+- The **coordination worktree** (`mesh/state`) is permanent. It is created by
+  `mesh init` or `mesh sync` and should never be removed by a merge operation.
+- A **task worktree** is ephemeral. It is created when a work item is claimed
+  and should be removed when that work item is merged.
+
+`mesh merge` is responsible for:
+
+1. Removing the task worktree via `git worktree remove` before deleting the
+   branch, to avoid git complaints about removing a checked-out branch.
+2. Deleting the remote task branch after the worktree is removed.
+3. Skipping worktree removal gracefully when `worktree_policy` is `off` or the
+   recorded worktree path no longer exists.
+
+The `workspace_id` field on a claim identifies a reusable agent lane, not a
+persistent directory. A new task claimed by the same agent lane should receive
+a fresh worktree on a fresh branch. Keeping the directory alive between tasks
+is not part of the design.
+
 ### Follow-up implications
 
 - `MESH-8` should split durable work definitions from live runtime state using
@@ -80,3 +102,4 @@ Creation and recovery rules:
   coordination worktree as the authoritative live-state location.
 - `MESH-10` should add write-safety and migration handling for shared live
   state.
+- `MESH-12` should implement task worktree and branch removal in `mesh merge`.

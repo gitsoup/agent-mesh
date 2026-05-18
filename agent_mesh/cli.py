@@ -579,7 +579,7 @@ def handle_merge(args: argparse.Namespace) -> int:
     # Guard: verify branch is merged into default branch before destroying anything
     if claim.branch and not getattr(args, "skip_merge_check", False):
         base = config.default_branch
-        result = run_git(repo_root, ["branch", "--merged", base, "--list", claim.branch])
+        result = run_git(repo_root, ["branch", "--merged", "origin/{0}".format(base), "--list", claim.branch])
         if result.returncode != 0 or claim.branch not in result.stdout:
             emit(
                 "ERROR: branch {0} does not appear merged into {1}. "
@@ -606,8 +606,7 @@ def handle_merge(args: argparse.Namespace) -> int:
                         "Commit or stash them, or use --discard-uncommitted to discard.".format(worktree_path)
                     )
                     return 1
-                emit("WARNING: discarding uncommitted changes in worktree {0}".format(worktree_path))
-                warnings_fired = True
+                emit("Discarding uncommitted changes in worktree {0} (--discard-uncommitted)".format(worktree_path))
             result = run_git(repo_root, ["worktree", "remove", "--force", str(worktree_path)])
             if result.returncode == 0:
                 emit("Removed worktree: {0}".format(worktree_path))

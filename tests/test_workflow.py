@@ -868,3 +868,57 @@ def test_merge_blocks_on_coordination_worktree(tmp_path: Path, monkeypatch, caps
     assert exit_code == 1
     assert "refusing to remove" in output
     assert coordination_path.exists()
+
+
+def _init_real_git_repo(tmp_path, monkeypatch, capsys, worktree_policy="required"):
+    repo_root = tmp_path / "demo-repo"
+    repo_root.mkdir(parents=True)
+    subprocess.run(["git", "init", "-b", "main"], cwd=repo_root, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.email", "mesh@example.com"], cwd=repo_root, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.name", "Agent Mesh Tests"], cwd=repo_root, check=True, capture_output=True)
+    (repo_root / "README.md").write_text("demo\n", encoding="utf-8")
+    subprocess.run(["git", "add", "README.md"], cwd=repo_root, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "initial"], cwd=repo_root, check=True, capture_output=True)
+    monkeypatch.chdir(repo_root)
+    run_cli(
+        ["init", "--project-name", "demo", "--project-key", "APP", "--provider", "local",
+         "--adapters", "generic,codex,claude", "--worktree-policy", worktree_policy, "--yes"],
+        capsys,
+    )
+    return repo_root
+
+
+def test_merge_blocks_on_dirty_worktree_without_flag(tmp_path: Path, monkeypatch, capsys) -> None:
+    repo_root = _init_real_git_repo(tmp_path, monkeypatch, capsys)
+    run_cli(["task", "add", "Implement auth endpoint", "--module", "api"], capsys)
+    run_cli(["claim", "APP-1", "--agent", "codex", "--role", "implementer", "--no-push"], capsys)
+    run_cli(["pr", "--dry-run", "--work-id", "APP-1"], capsys)
+
+    claim = json.loads((repo_root / ".agentic/claims/APP-1.json").read_text(encoding="utf-8"))
+    # Write an uncommitted file into the task worktree
+    (Path(claim["worktree"]) / "dirty.txt").write_text("unfinished\n", encoding="utf-8")
+
+    exit_code, output = run_cli(["merge", "APP-1", "--no-push", "--skip-merge-check"], capsys)
+
+    assert exit_code == 1
+    assert "uncommitted changes" in output
+    assert (repo_root / ".agentic/claims/APP-1.json").exists()
+
+
+def test_merge_discard_uncommitted_proceeds_and_rebuilds_dashboard(tmp_path: Path, monkeypatch, capsys) -> None:
+    repo_root = _init_real_git_repo(tmp_path, monkeypatch, capsys)
+    run_cli(["task", "add", "Implement auth endpoint", "--module", "api"], capsys)
+    run_cli(["claim", "APP-1", "--agent", "codex", "--role", "implementer", "--no-push"], capsys)
+    run_cli(["pr", "--dry-run", "--work-id", "APP-1"], capsys)
+
+    claim = json.loads((repo_root / ".agentic/claims/APP-1.json").read_text(encoding="utf-8"))
+    (Path(claim["worktree"]) / "dirty.txt").write_text("unfinished\n", encoding="utf-8")
+
+    exit_code, output = run_cli(
+        ["merge", "APP-1", "--no-push", "--skip-merge-check", "--discard-uncommitted"], capsys
+    )
+
+    assert exit_code == 0
+    assert "--discard-uncommitted" in output
+    assert "Marked APP-1 done" in output
+    assert "Built dashboard" in output

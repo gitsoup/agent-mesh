@@ -76,7 +76,7 @@ completed step, next intended action, and any open risks or blockers.
 
 ## Steps
 
-1. Inspect `.agentic/project.json`, claims, reviews, handoffs, and work items.
+1. Inspect `.agentic/project.json`, handoffs, claims, reviews, and work items — in that order.
 2. Identify active claims, stale claims, open reviews, and pending handoffs.
 3. Report a compact summary of current coordination state.
 4. If a handoff exists, surface the continuation note first.

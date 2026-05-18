@@ -535,20 +535,24 @@ def handle_review(args: argparse.Namespace) -> int:
     return 0
 
 
-def handle_dashboard_build(_: argparse.Namespace) -> int:
+def build_dashboard(repo_root: Path) -> None:
     from agent_mesh.config import load_project_config
-    from agent_mesh.state.storage import list_claims, list_reviews, list_work_items, resolve_repo_root
+    from agent_mesh.state.storage import list_claims, list_reviews, list_work_items
 
-    repo_root = resolve_repo_root(Path.cwd())
     config = load_project_config(repo_root)
     output_path = repo_root / config.dashboard.output_dir / "index.html"
     output_path.parent.mkdir(parents=True, exist_ok=True)
-
     work_items = list_work_items(repo_root)
     claims = list_claims(repo_root)
     reviews = list_reviews(repo_root)
     output_path.write_text(render_dashboard_html(config, work_items, claims, reviews), encoding="utf-8")
     emit("Built dashboard at {0}".format(output_path))
+
+
+def handle_dashboard_build(_: argparse.Namespace) -> int:
+    from agent_mesh.state.storage import resolve_repo_root
+
+    build_dashboard(resolve_repo_root(Path.cwd()))
     return 0
 
 
@@ -674,7 +678,7 @@ def handle_merge(args: argparse.Namespace) -> int:
         warnings_fired = True
 
     if config.dashboard.enabled and not warnings_fired:
-        handle_dashboard_build(argparse.Namespace())
+        build_dashboard(repo_root)
     elif config.dashboard.enabled:
         emit("Skipped dashboard rebuild due to warnings — run mesh sync to rebuild")
 
@@ -702,7 +706,7 @@ def handle_sync(_: argparse.Namespace) -> int:
             emit("ERROR: {0}".format(error))
             return 1
     if config.dashboard.enabled:
-        handle_dashboard_build(argparse.Namespace())
+        build_dashboard(repo_root)
     return handle_doctor(argparse.Namespace())
 
 
@@ -1046,63 +1050,219 @@ def render_dashboard_html(config, work_items: Iterable[object], claims: Iterable
     work_items = list(work_items)
     claims = list(claims)
     reviews = list(reviews)
-    work_summary = "".join(
-        "<li>{0}: {1}</li>".format(status, count)
-        for status, count in sorted(count_by_status(work_items).items())
+
+    counts = count_by_status(work_items)
+    total = sum(counts.values())
+    done = counts.get("done", 0)
+    progress_pct = int(done / total * 100) if total else 0
+
+    status_colors = {
+        "done": ("#16a34a", "#dcfce7"),
+        "ready": ("#2563eb", "#dbeafe"),
+        "in_progress": ("#d97706", "#fef3c7"),
+        "blocked": ("#dc2626", "#fee2e2"),
+        "review": ("#7c3aed", "#ede9fe"),
+    }
+    kind_colors = {
+        "bug": ("#dc2626", "#fee2e2"),
+        "feature": ("#0891b2", "#cffafe"),
+        "security": ("#7c3aed", "#ede9fe"),
+        "refactor": ("#4b5563", "#f3f4f6"),
+    }
+    risk_colors = {"high": "#dc2626", "medium": "#d97706", "low": "#16a34a"}
+
+    def badge(text, fg, bg):
+        return '<span style="display:inline-block;padding:1px 8px;border-radius:12px;font-size:0.75rem;font-weight:600;color:{0};background:{1}">{2}</span>'.format(fg, bg, text)
+
+    def status_badge(s):
+        fg, bg = status_colors.get(s, ("#374151", "#f3f4f6"))
+        return badge(s, fg, bg)
+
+    def kind_badge(k):
+        fg, bg = kind_colors.get(k, ("#374151", "#f3f4f6"))
+        return badge(k, fg, bg)
+
+    def risk_dot(r):
+        color = risk_colors.get(r, "#9ca3af")
+        return '<span title="risk: {0}" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:{1};margin-right:4px"></span>'.format(r, color)
+
+    summary_chips = "".join(
+        '<span style="display:inline-flex;align-items:center;gap:6px;padding:4px 14px;border-radius:20px;background:{1};color:{0};font-weight:600;font-size:0.85rem">'
+        '<span style="font-size:1.1rem">{3}</span>{2}: {4}</span>'.format(
+            fg, bg,
+            status,
+            {"done": "✓", "ready": "○", "in_progress": "◉", "blocked": "✗", "review": "⟳"}.get(status, "·"),
+            count,
+            *((fg, bg) for fg, bg in [status_colors.get(status, ("#374151", "#f3f4f6"))]),
+        )
+        for status, count in sorted(counts.items())
+        for fg, bg in [status_colors.get(status, ("#374151", "#f3f4f6"))]
     )
-    work_list = "".join(
-        "<li>{0} [{1}] {2}</li>".format(item.id, item.status, item.title) for item in work_items
+
+    task_rows = "".join(
+        '<tr class="task-row" data-status="{status}" data-kind="{kind}">'
+        '<td style="padding:10px 12px;font-family:monospace;font-size:0.85rem;white-space:nowrap">{id}</td>'
+        '<td style="padding:10px 12px">{status_b}</td>'
+        '<td style="padding:10px 12px">{kind_b}</td>'
+        '<td style="padding:10px 6px">{risk_d}</td>'
+        '<td style="padding:10px 12px;max-width:420px">'
+        '<span style="font-weight:500">{title}</span>'
+        '<div class="task-detail" style="display:none;margin-top:6px;font-size:0.82rem;color:#4b5563;line-height:1.6">'
+        '<strong>Module:</strong> {module}&nbsp;&nbsp;<strong>Risk:</strong> {risk}'
+        '</div>'
+        '</td>'
+        '</tr>'.format(
+            id=item.id,
+            status=item.status,
+            kind=getattr(item, "kind", ""),
+            status_b=status_badge(item.status),
+            kind_b=kind_badge(getattr(item, "kind", "")),
+            risk_d=risk_dot(getattr(item, "risk", "")),
+            risk=getattr(item, "risk", "—"),
+            title=item.title,
+            module=getattr(item, "module", "—"),
+        )
+        for item in sorted(work_items, key=lambda x: (x.status != "in_progress", x.status != "review", x.status != "ready", x.id))
     )
-    claim_list = "".join(
-        "<li>{0} [{1}] {2}</li>".format(item.work_id, item.agent_runtime, item.branch)
-        for item in claims
-    )
-    review_list = "".join(
-        "<li>{0} [{1}]</li>".format(item.id, item.status) for item in reviews
-    )
+
+    claim_cards = "".join(
+        '<div style="border:1px solid #e5e7eb;border-radius:8px;padding:12px 14px;margin-bottom:10px">'
+        '<div style="display:flex;justify-content:space-between;align-items:center">'
+        '<span style="font-family:monospace;font-weight:700;color:#1d4ed8">{work_id}</span>'
+        '{status_b}'
+        '</div>'
+        '<div style="font-size:0.82rem;color:#374151;margin-top:6px">'
+        '<span style="margin-right:12px">🤖 {agent}</span>'
+        '<span style="color:#6b7280;font-family:monospace;font-size:0.78rem">{branch}</span>'
+        '</div>'
+        '</div>'.format(
+            work_id=c.work_id,
+            status_b=status_badge("in_progress"),
+            agent=getattr(c, "agent_runtime", "agent"),
+            branch=getattr(c, "branch", ""),
+        )
+        for c in claims
+    ) or '<p style="color:#9ca3af;font-size:0.9rem">No active claims</p>'
+
+    review_cards = "".join(
+        '<div style="display:flex;justify-content:space-between;align-items:center;'
+        'border:1px solid #e5e7eb;border-radius:8px;padding:10px 14px;margin-bottom:8px">'
+        '<span style="font-family:monospace;font-weight:600">{id}</span>'
+        '{status_b}'
+        '</div>'.format(
+            id=r.id,
+            status_b=status_badge(r.status),
+        )
+        for r in reviews
+    ) or '<p style="color:#9ca3af;font-size:0.9rem">No reviews</p>'
+
     return """<!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="utf-8">
-    <title>{0} Agent Mesh Dashboard</title>
-    <style>
-      body {{ font-family: sans-serif; margin: 2rem auto; max-width: 960px; line-height: 1.5; }}
-      .meta {{ color: #555; }}
-      .grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1.5rem; }}
-      .panel {{ border: 1px solid #ddd; border-radius: 10px; padding: 1rem; }}
-      code {{ background: #f3f3f3; padding: 0.1rem 0.3rem; border-radius: 4px; }}
-    </style>
-  </head>
-  <body>
-    <h1>{0} Agent Mesh Dashboard</h1>
-    <p class="meta">Project key: <code>{4}</code></p>
-    <div class="grid">
-      <section class="panel">
-        <h2>Task Summary</h2>
-        <ul>{1}</ul>
-      </section>
-      <section class="panel">
-        <h2>Active Claims</h2>
-        <ul>{2}</ul>
-      </section>
-      <section class="panel">
-        <h2>Pending Reviews</h2>
-        <ul>{3}</ul>
-      </section>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>{project_name} · Agent Mesh</title>
+  <style>
+    *, *::before, *::after {{ box-sizing: border-box; margin: 0; padding: 0; }}
+    body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f8fafc; color: #1e293b; line-height: 1.5; }}
+    header {{ background: linear-gradient(135deg, #0f172a 0%, #1e3a5f 100%); color: white; padding: 28px 32px; }}
+    header h1 {{ font-size: 1.6rem; font-weight: 700; letter-spacing: -0.02em; }}
+    header .sub {{ opacity: 0.65; font-size: 0.85rem; margin-top: 4px; font-family: monospace; }}
+    .main {{ max-width: 1100px; margin: 0 auto; padding: 28px 24px; }}
+    .progress-wrap {{ background: white; border-radius: 12px; padding: 20px 24px; margin-bottom: 24px; box-shadow: 0 1px 3px rgba(0,0,0,.06); }}
+    .progress-label {{ display: flex; justify-content: space-between; font-size: 0.85rem; color: #475569; margin-bottom: 8px; }}
+    .progress-bar {{ height: 10px; background: #e2e8f0; border-radius: 5px; overflow: hidden; }}
+    .progress-fill {{ height: 100%; border-radius: 5px; background: linear-gradient(90deg, #16a34a, #4ade80); transition: width .4s ease; }}
+    .chips {{ display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }}
+    .grid-2 {{ display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 24px; }}
+    @media(max-width:680px) {{ .grid-2 {{ grid-template-columns: 1fr; }} }}
+    .card {{ background: white; border-radius: 12px; padding: 20px 22px; box-shadow: 0 1px 3px rgba(0,0,0,.06); }}
+    .card h2 {{ font-size: 0.95rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: #64748b; margin-bottom: 14px; }}
+    .task-card {{ background: white; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,.06); overflow: hidden; }}
+    .task-card-header {{ padding: 16px 22px; border-bottom: 1px solid #f1f5f9; display: flex; align-items: center; gap: 12px; }}
+    .task-card-header h2 {{ font-size: 0.95rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: #64748b; flex: 1; }}
+    .filters {{ display: flex; gap: 8px; flex-wrap: wrap; }}
+    .filter-btn {{ border: 1px solid #e2e8f0; background: white; border-radius: 6px; padding: 3px 10px; font-size: 0.78rem; cursor: pointer; color: #475569; transition: all .15s; }}
+    .filter-btn:hover, .filter-btn.active {{ background: #1e3a5f; color: white; border-color: #1e3a5f; }}
+    table {{ width: 100%; border-collapse: collapse; }}
+    thead th {{ padding: 10px 12px; text-align: left; font-size: 0.78rem; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: #94a3b8; border-bottom: 1px solid #f1f5f9; }}
+    .task-row {{ border-bottom: 1px solid #f8fafc; cursor: pointer; transition: background .1s; }}
+    .task-row:hover {{ background: #f8fafc; }}
+    .task-row:last-child {{ border-bottom: none; }}
+    .task-detail {{ border-top: 1px solid #f1f5f9; padding: 8px 12px 4px; background: #fafafa; }}
+  </style>
+</head>
+<body>
+  <header>
+    <h1>⬡ {project_name}</h1>
+    <div class="sub">Agent Mesh · <code>{project_key}</code></div>
+  </header>
+  <div class="main">
+    <div class="progress-wrap">
+      <div class="progress-label">
+        <span>Overall progress</span>
+        <span><strong>{done}</strong> / {total} tasks done ({pct}%)</span>
+      </div>
+      <div class="progress-bar"><div class="progress-fill" style="width:{pct}%"></div></div>
+      <div class="chips">{summary_chips}</div>
     </div>
-    <section class="panel">
-      <h2>Task Details</h2>
-      <ul>{5}</ul>
-    </section>
-  </body>
-</html>
-""".format(
-        config.project_name,
-        work_summary or "<li>None</li>",
-        claim_list or "<li>None</li>",
-        review_list or "<li>None</li>",
-        config.project_key,
-        work_list or "<li>None</li>",
+    <div class="grid-2">
+      <div class="card">
+        <h2>Active Claims</h2>
+        {claim_cards}
+      </div>
+      <div class="card">
+        <h2>Reviews</h2>
+        {review_cards}
+      </div>
+    </div>
+    <div class="task-card">
+      <div class="task-card-header">
+        <h2>Tasks</h2>
+        <div class="filters">
+          <button class="filter-btn active" onclick="filter(this,'all')">All</button>
+          <button class="filter-btn" onclick="filter(this,'ready')">Ready</button>
+          <button class="filter-btn" onclick="filter(this,'in_progress')">In Progress</button>
+          <button class="filter-btn" onclick="filter(this,'done')">Done</button>
+          <button class="filter-btn" onclick="filter(this,'bug')">Bugs</button>
+          <button class="filter-btn" onclick="filter(this,'feature')">Features</button>
+        </div>
+      </div>
+      <table>
+        <thead><tr>
+          <th>ID</th><th>Status</th><th>Kind</th><th>Risk</th><th>Title</th>
+        </tr></thead>
+        <tbody id="task-tbody">{task_rows}</tbody>
+      </table>
+    </div>
+  </div>
+  <script>
+    document.querySelectorAll('.task-row').forEach(function(row) {{
+      row.addEventListener('click', function() {{
+        var detail = row.querySelector('.task-detail');
+        detail.style.display = detail.style.display === 'none' ? 'block' : 'none';
+      }});
+    }});
+    function filter(btn, val) {{
+      document.querySelectorAll('.filter-btn').forEach(function(b) {{ b.classList.remove('active'); }});
+      btn.classList.add('active');
+      document.querySelectorAll('.task-row').forEach(function(row) {{
+        var show = val === 'all' || row.dataset.status === val || row.dataset.kind === val;
+        row.style.display = show ? '' : 'none';
+      }});
+    }}
+  </script>
+</body>
+</html>""".format(
+        project_name=config.project_name,
+        project_key=config.project_key,
+        done=done,
+        total=total,
+        pct=progress_pct,
+        summary_chips=summary_chips,
+        claim_cards=claim_cards,
+        review_cards=review_cards,
+        task_rows=task_rows,
     )
 
 

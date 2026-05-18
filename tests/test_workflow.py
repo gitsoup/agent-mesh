@@ -204,7 +204,7 @@ def test_doctor_status_and_task_lifecycle(tmp_path: Path, monkeypatch, capsys) -
     assert "Built dashboard" in output
     dashboard = repo_root / ".agentic/dashboard/index.html"
     assert dashboard.exists()
-    assert "Task Summary" in dashboard.read_text(encoding="utf-8")
+    assert "Agent Mesh" in dashboard.read_text(encoding="utf-8")
 
 
 def test_claim_creates_dedicated_worktree_when_required(tmp_path: Path, monkeypatch, capsys) -> None:
@@ -922,3 +922,24 @@ def test_merge_discard_uncommitted_proceeds_and_rebuilds_dashboard(tmp_path: Pat
     assert "--discard-uncommitted" in output
     assert "Marked APP-1 done" in output
     assert "Built dashboard" in output
+
+
+def test_merge_from_inside_task_worktree_completes_dashboard_rebuild(tmp_path: Path, monkeypatch, capsys) -> None:
+    # Regression test for MESH-15: mesh merge called from inside the task
+    # worktree crashed on dashboard rebuild because Path.cwd() raised
+    # FileNotFoundError after the worktree directory was removed.
+    repo_root = _init_real_git_repo(tmp_path, monkeypatch, capsys)
+    run_cli(["task", "add", "Implement auth endpoint", "--module", "api"], capsys)
+    run_cli(["claim", "APP-1", "--agent", "agent", "--role", "implementer", "--no-push"], capsys)
+    run_cli(["pr", "--dry-run", "--work-id", "APP-1"], capsys)
+
+    claim = json.loads((repo_root / ".agentic/claims/APP-1.json").read_text(encoding="utf-8"))
+    # Simulate the user running mesh merge from inside the task worktree
+    monkeypatch.chdir(Path(claim["worktree"]))
+
+    exit_code, output = run_cli(["merge", "APP-1", "--no-push", "--skip-merge-check"], capsys)
+
+    assert exit_code == 0, output
+    assert "Removed worktree" in output
+    assert "Built dashboard" in output
+    assert (repo_root / ".agentic/claims/archive/APP-1.json").exists()

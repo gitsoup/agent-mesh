@@ -252,6 +252,64 @@ def test_claim_creates_dedicated_worktree_when_required(tmp_path: Path, monkeypa
     assert "via {0}".format(claim["workspace_id"]) in output
 
 
+def test_init_creates_coordination_worktree_for_real_git_repo(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    repo_root = tmp_path / "demo-repo"
+    repo_root.mkdir(parents=True)
+    subprocess.run(["git", "init", "-b", "main"], cwd=repo_root, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "config", "user.email", "mesh@example.com"],
+        cwd=repo_root,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Agent Mesh Tests"],
+        cwd=repo_root,
+        check=True,
+        capture_output=True,
+    )
+    (repo_root / "README.md").write_text("demo\n", encoding="utf-8")
+    subprocess.run(["git", "add", "README.md"], cwd=repo_root, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "initial"], cwd=repo_root, check=True, capture_output=True)
+    monkeypatch.chdir(repo_root)
+
+    exit_code, output = run_cli(
+        [
+            "init",
+            "--project-name",
+            "demo",
+            "--project-key",
+            "APP",
+            "--provider",
+            "local",
+            "--adapters",
+            "generic,codex,claude",
+            "--worktree-policy",
+            "required",
+            "--yes",
+        ],
+        capsys,
+    )
+    assert exit_code == 0
+    assert "Coordination worktree created: mesh/state @" in output
+
+    project = json.loads((repo_root / ".agentic/project.json").read_text(encoding="utf-8"))
+    coordination_path = repo_root.parent / "{0}-mesh-state".format(repo_root.name)
+    assert coordination_path.exists()
+    assert (
+        subprocess.run(
+            ["git", "branch", "--show-current"],
+            cwd=coordination_path,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        == project["coordination"]["branch"]
+    )
+
+
 def test_pr_dry_run_reports_review_packet_path_from_task_worktree(
     tmp_path: Path, monkeypatch, capsys
 ) -> None:
@@ -304,6 +362,56 @@ def test_pr_dry_run_reports_review_packet_path_from_task_worktree(
     expected_path = repo_root / ".agentic/reviews/PR-APP-1.json"
     assert "Dry-run: review packet written to {0}".format(expected_path) in output
     assert expected_path.exists()
+
+
+def test_sync_recreates_missing_coordination_worktree(tmp_path: Path, monkeypatch, capsys) -> None:
+    repo_root = tmp_path / "demo-repo"
+    repo_root.mkdir(parents=True)
+    subprocess.run(["git", "init", "-b", "main"], cwd=repo_root, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "config", "user.email", "mesh@example.com"],
+        cwd=repo_root,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Agent Mesh Tests"],
+        cwd=repo_root,
+        check=True,
+        capture_output=True,
+    )
+    (repo_root / "README.md").write_text("demo\n", encoding="utf-8")
+    subprocess.run(["git", "add", "README.md"], cwd=repo_root, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "initial"], cwd=repo_root, check=True, capture_output=True)
+    monkeypatch.chdir(repo_root)
+
+    exit_code, _ = run_cli(
+        [
+            "init",
+            "--project-name",
+            "demo",
+            "--project-key",
+            "APP",
+            "--provider",
+            "local",
+            "--adapters",
+            "generic,codex,claude",
+            "--worktree-policy",
+            "required",
+            "--yes",
+        ],
+        capsys,
+    )
+    assert exit_code == 0
+
+    coordination_path = repo_root.parent / "{0}-mesh-state".format(repo_root.name)
+    subprocess.run(["git", "worktree", "remove", str(coordination_path)], cwd=repo_root, check=True, capture_output=True)
+    assert not coordination_path.exists()
+
+    exit_code, output = run_cli(["sync"], capsys)
+    assert exit_code == 0
+    assert "Coordination worktree created: mesh/state @" in output
+    assert coordination_path.exists()
 
 
 def test_claim_resume_updates_existing_claim(tmp_path: Path, monkeypatch, capsys) -> None:

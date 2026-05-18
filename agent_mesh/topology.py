@@ -17,6 +17,15 @@ class CoordinationWorktreeStatus:
     detail: str | None = None
 
 
+@dataclass(frozen=True)
+class CoordinationRepairResult:
+    branch: str
+    path: Path
+    action: str
+    state: str
+    detail: str | None = None
+
+
 def resolve_coordination_worktree_path(repo_root: Path, config: ProjectConfig) -> Path:
     configured_path = config.coordination.coordination_worktree
     if configured_path:
@@ -95,3 +104,109 @@ def run_git_text(repo_root: Path, args: list[str]) -> str | None:
     if result.returncode != 0:
         return None
     return result.stdout
+
+
+def ensure_coordination_worktree(repo_root: Path, config: ProjectConfig) -> CoordinationRepairResult:
+    status = inspect_coordination_worktree(repo_root, config)
+    branch = config.coordination.branch
+    path = status.path
+
+    if status.state == "ready":
+        return CoordinationRepairResult(
+            branch=branch,
+            path=path,
+            action="noop",
+            state="ready",
+        )
+
+    if status.state == "missing":
+        create_coordination_worktree(repo_root, config, path)
+        return CoordinationRepairResult(
+            branch=branch,
+            path=path,
+            action="created",
+            state="ready",
+        )
+
+    if status.state == "wrong_branch":
+        checkout_coordination_branch(repo_root, config, path)
+        return CoordinationRepairResult(
+            branch=branch,
+            path=path,
+            action="repaired",
+            state="ready",
+            detail="switched coordination worktree to {0}".format(branch),
+        )
+
+    if status.state == "dirty":
+        raise RuntimeError(
+            "coordination worktree at {0} is dirty; clean it before running sync".format(path)
+        )
+
+    raise RuntimeError(
+        "coordination worktree at {0} is invalid{1}".format(
+            path,
+            ": {0}".format(status.detail) if status.detail else "",
+        )
+    )
+
+
+def create_coordination_worktree(repo_root: Path, config: ProjectConfig, path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    branch = config.coordination.branch
+    if branch_exists(repo_root, branch):
+        args = ["worktree", "add", str(path), branch]
+    else:
+        args = ["worktree", "add", "-b", branch, str(path), config.default_branch]
+    result = subprocess.run(
+        ["git", *args],
+        cwd=repo_root,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode == 0:
+        return
+
+    detail = (result.stderr or result.stdout).strip()
+    raise RuntimeError("failed to create coordination worktree: {0}".format(detail))
+
+
+def checkout_coordination_branch(repo_root: Path, config: ProjectConfig, path: Path) -> None:
+    dirty = run_git_text(path, ["status", "--porcelain"])
+    if dirty is None:
+        raise RuntimeError("failed to inspect coordination worktree status")
+    if dirty.strip():
+        raise RuntimeError(
+            "coordination worktree at {0} is dirty; clean it before repair".format(path)
+        )
+
+    branch = config.coordination.branch
+    if branch_exists(repo_root, branch):
+        args = ["switch", branch]
+    else:
+        args = ["switch", "-c", branch, config.default_branch]
+
+    result = subprocess.run(
+        ["git", *args],
+        cwd=path,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode == 0:
+        return
+
+    detail = (result.stderr or result.stdout).strip()
+    raise RuntimeError("failed to repair coordination worktree: {0}".format(detail))
+
+
+def branch_exists(repo_root: Path, branch: str) -> bool:
+    result = subprocess.run(
+        ["git", "show-ref", "--verify", "--quiet", "refs/heads/{0}".format(branch)],
+        cwd=repo_root,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    return result.returncode == 0

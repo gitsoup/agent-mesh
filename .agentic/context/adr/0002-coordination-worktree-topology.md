@@ -47,11 +47,12 @@ Health rules:
 
 Creation and recovery rules:
 
-- `mesh init` records the coordination topology contract, but it does not need
-  to eagerly create the coordination worktree.
-- Commands that begin relying on authoritative live state should create or
-  repair the coordination worktree before writing through it.
-- Until that live-state routing lands, `mesh status` and `mesh doctor` should
+- `mesh init` records the coordination topology contract and should create the
+  coordination worktree automatically for real git repos with worktrees
+  enabled.
+- `mesh sync` is the recovery path when the coordination worktree is missing or
+  on the wrong branch.
+- Until full live-state routing lands, `mesh status` and `mesh doctor` should
   surface the expected topology and obvious misconfiguration.
 
 ## Consequences
@@ -76,6 +77,6 @@ Creation and recovery rules:
 - `MESH-8` should split durable work definitions from live runtime state using
   this topology.
 - `MESH-9` should route claim, PR, review, and sync flows through the
-  coordination worktree.
+  coordination worktree as the authoritative live-state location.
 - `MESH-10` should add write-safety and migration handling for shared live
   state.

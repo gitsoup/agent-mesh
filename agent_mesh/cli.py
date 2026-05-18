@@ -167,8 +167,10 @@ def handle_version(_: argparse.Namespace) -> int:
 
 
 def handle_init(args: argparse.Namespace) -> int:
+    from agent_mesh.config import load_project_config
     from agent_mesh.scaffold import init_repo
     from agent_mesh.state.storage import resolve_repo_root
+    from agent_mesh.topology import ensure_coordination_worktree
 
     repo_root = resolve_repo_root(Path.cwd())
     project_name = args.project_name or repo_root.name
@@ -190,6 +192,18 @@ def handle_init(args: argparse.Namespace) -> int:
     emit("Initialized Agent Mesh in {0}".format(repo_root))
     emit("Created {0} files.".format(len(result.created)))
     emit("Skipped {0} existing files.".format(len(result.skipped)))
+    if args.worktree_policy != "off" and git_head_available(repo_root):
+        try:
+            coordination = ensure_coordination_worktree(repo_root, load_project_config(repo_root))
+            emit(
+                "Coordination worktree {0}: {1} @ {2}".format(
+                    coordination.action,
+                    coordination.branch,
+                    coordination.path,
+                )
+            )
+        except RuntimeError as error:
+            emit("WARN: {0}".format(error))
     return 0
 
 
@@ -498,9 +512,23 @@ def handle_dashboard_build(_: argparse.Namespace) -> int:
 def handle_sync(_: argparse.Namespace) -> int:
     from agent_mesh.config import load_project_config
     from agent_mesh.state.storage import resolve_repo_root
+    from agent_mesh.topology import ensure_coordination_worktree
 
     repo_root = resolve_repo_root(Path.cwd())
     config = load_project_config(repo_root)
+    if config.coordination.worktree_policy != "off" and git_head_available(repo_root):
+        try:
+            coordination = ensure_coordination_worktree(repo_root, config)
+            emit(
+                "Coordination worktree {0}: {1} @ {2}".format(
+                    coordination.action,
+                    coordination.branch,
+                    coordination.path,
+                )
+            )
+        except RuntimeError as error:
+            emit("ERROR: {0}".format(error))
+            return 1
     if config.dashboard.enabled:
         handle_dashboard_build(argparse.Namespace())
     return handle_doctor(argparse.Namespace())
@@ -513,6 +541,11 @@ def derive_project_key(project_name: str) -> str:
 
 def parse_csv(raw: str) -> List[str]:
     return [item.strip() for item in raw.split(",") if item.strip()]
+
+
+def git_head_available(repo_root: Path) -> bool:
+    result = run_git(repo_root, ["rev-parse", "--verify", "HEAD"])
+    return result.returncode == 0
 
 
 def resolve_review_packet_path(repo_root: Path, target: str) -> Optional[Path]:

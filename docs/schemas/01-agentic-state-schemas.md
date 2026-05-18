@@ -169,6 +169,8 @@ Notes:
   configured, otherwise a sibling checkout named `<repo>-mesh-state`.
 - A missing coordination worktree is a recoverable bootstrap state. A present
   coordination worktree must be a git worktree checked out on `mesh/state`.
+- `mesh init` should create the coordination worktree for real git repos when
+  worktrees are enabled. `mesh sync` should recreate it when it is missing.
 
 Review statuses:
 

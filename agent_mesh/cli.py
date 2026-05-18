@@ -112,7 +112,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     claim_parser = subparsers.add_parser("claim", help="Claim a local work item.")
     claim_parser.add_argument("work_id")
-    claim_parser.add_argument("--agent", default="codex")
+    claim_parser.add_argument("--agent", default="agent")
     claim_parser.add_argument("--role", default="implementer")
     claim_parser.add_argument("--machine", default=socket.gethostname())
     claim_parser.add_argument("--workspace-id")

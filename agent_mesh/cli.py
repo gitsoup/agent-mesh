@@ -153,6 +153,8 @@ def build_parser() -> argparse.ArgumentParser:
     merge_parser = subparsers.add_parser("merge", help="Finalize a merged work item and clean up.")
     merge_parser.add_argument("work_id", help="Work item ID (e.g. APP-1).")
     merge_parser.add_argument("--no-push", action="store_true", help="Skip remote branch deletion.")
+    merge_parser.add_argument("--skip-merge-check", action="store_true", help="Skip check that branch is merged into default branch.")
+    merge_parser.add_argument("--discard-uncommitted", action="store_true", help="Remove worktree even if it has uncommitted changes.")
     merge_parser.set_defaults(func=handle_merge)
 
     return parser
@@ -560,6 +562,7 @@ def handle_merge(args: argparse.Namespace) -> int:
 
     repo_root = resolve_repo_root(Path.cwd())
     config = load_project_config(repo_root)
+    warnings_fired = False
 
     work_path = repo_root / ".agentic/work" / "{0}.json".format(args.work_id)
     if not work_path.exists():
@@ -573,6 +576,19 @@ def handle_merge(args: argparse.Namespace) -> int:
         return 1
     claim = load_model(claim_path, Claim)
 
+    # Guard: verify branch is merged into default branch before destroying anything
+    if claim.branch and not getattr(args, "skip_merge_check", False):
+        base = config.default_branch
+        result = run_git(repo_root, ["branch", "--merged", base, "--list", claim.branch])
+        if result.returncode != 0 or claim.branch not in result.stdout:
+            emit(
+                "ERROR: branch {0} does not appear merged into {1}. "
+                "Merge the PR first, or use --skip-merge-check to override.".format(
+                    claim.branch, base
+                )
+            )
+            return 1
+
     coordination_worktree = resolve_coordination_worktree_path(repo_root, config)
 
     # Remove task worktree if it exists and is not the coordination worktree
@@ -582,6 +598,16 @@ def handle_merge(args: argparse.Namespace) -> int:
             emit("ERROR: claim worktree matches the coordination worktree — refusing to remove it")
             return 1
         if worktree_path.exists() and (worktree_path / ".git").exists():
+            dirty = run_git(worktree_path, ["status", "--porcelain"])
+            if dirty.returncode == 0 and dirty.stdout.strip():
+                if not getattr(args, "discard_uncommitted", False):
+                    emit(
+                        "ERROR: worktree {0} has uncommitted changes. "
+                        "Commit or stash them, or use --discard-uncommitted to discard.".format(worktree_path)
+                    )
+                    return 1
+                emit("WARNING: discarding uncommitted changes in worktree {0}".format(worktree_path))
+                warnings_fired = True
             result = run_git(repo_root, ["worktree", "remove", "--force", str(worktree_path)])
             if result.returncode == 0:
                 emit("Removed worktree: {0}".format(worktree_path))
@@ -589,6 +615,7 @@ def handle_merge(args: argparse.Namespace) -> int:
                 emit("WARNING: could not remove worktree {0}: {1}".format(
                     worktree_path, (result.stderr or result.stdout).strip()
                 ))
+                warnings_fired = True
         else:
             emit("Worktree already absent: {0}".format(claim.worktree))
 
@@ -599,10 +626,11 @@ def handle_merge(args: argparse.Namespace) -> int:
             emit("Deleted remote branch: {0}".format(claim.branch))
         else:
             detail = (result.stderr or result.stdout).strip()
-            if "remote ref does not exist" in detail or "error: unable to delete" in detail:
+            if "remote ref does not exist" in detail:
                 emit("Remote branch already absent: {0}".format(claim.branch))
             else:
                 emit("WARNING: could not delete remote branch {0}: {1}".format(claim.branch, detail))
+                warnings_fired = True
 
     # Delete local branch (force since merge happened on remote via PR)
     if claim.branch and branch_exists(repo_root, claim.branch):
@@ -613,6 +641,7 @@ def handle_merge(args: argparse.Namespace) -> int:
             emit("WARNING: could not delete local branch {0}: {1}".format(
                 claim.branch, (result.stderr or result.stdout).strip()
             ))
+            warnings_fired = True
 
     # Update review packet status to merged if one exists
     review_packet_path = repo_root / ".agentic/reviews" / "PR-{0}.json".format(args.work_id)
@@ -622,25 +651,35 @@ def handle_merge(args: argparse.Namespace) -> int:
         review.status = "merged"
         save_model_json(review_packet_path, review)
         emit("Marked review packet merged: PR-{0}".format(args.work_id))
+    else:
+        emit("WARNING: no review packet found for {0} — dashboard may show stale review state".format(args.work_id))
+        warnings_fired = True
 
-    # Archive the claim
-    archive_dir = repo_root / ".agentic/claims/archive"
-    archive_dir.mkdir(parents=True, exist_ok=True)
-    archive_path = archive_dir / "{0}.json".format(args.work_id)
-    shutil.move(str(claim_path), str(archive_path))
-    emit("Archived claim: {0}".format(archive_path.name))
-
-    # Mark work item done
+    # Mark work item done first — safer order: if archive fails, work item is
+    # already done and the live claim can be retried
     now = utc_now()
     work_item.status = "done"
     work_item.updated_at = now
     save_model_json(work_path, work_item)
     emit("Marked {0} done".format(args.work_id))
 
-    if config.dashboard.enabled:
-        handle_dashboard_build(argparse.Namespace())
+    # Archive the claim last
+    archive_dir = repo_root / ".agentic/claims/archive"
+    archive_dir.mkdir(parents=True, exist_ok=True)
+    archive_path = archive_dir / "{0}.json".format(args.work_id)
+    try:
+        shutil.move(str(claim_path), str(archive_path))
+        emit("Archived claim: {0}".format(archive_path.name))
+    except FileNotFoundError:
+        emit("WARNING: claim file already moved by a concurrent process — skipping archive")
+        warnings_fired = True
 
-    return 0
+    if config.dashboard.enabled and not warnings_fired:
+        handle_dashboard_build(argparse.Namespace())
+    elif config.dashboard.enabled:
+        emit("Skipped dashboard rebuild due to warnings — run mesh sync to rebuild")
+
+    return 2 if warnings_fired else 0
 
 
 def handle_sync(_: argparse.Namespace) -> int:

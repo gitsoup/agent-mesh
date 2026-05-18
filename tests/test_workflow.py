@@ -690,3 +690,97 @@ def test_skill_list_falls_back_to_catalog_outside_configured_repo(
     assert exit_code == 0
     assert "skill\tsummary\tcanonical" not in output
     assert "claim\tClaim a ready work item and prepare implementation context." in output
+
+
+def test_merge_archives_claim_and_marks_work_done(tmp_path: Path, monkeypatch, capsys) -> None:
+    repo_root = init_repo(tmp_path, monkeypatch, capsys)
+
+    run_cli(["task", "add", "Implement auth endpoint", "--module", "api"], capsys)
+    run_cli(["claim", "APP-1", "--agent", "codex", "--role", "implementer", "--no-push"], capsys)
+    run_cli(["pr", "--dry-run", "--work-id", "APP-1"], capsys)
+
+    exit_code, output = run_cli(["merge", "APP-1", "--no-push"], capsys)
+
+    assert exit_code == 0
+    assert "Archived claim: APP-1.json" in output
+    assert "Marked APP-1 done" in output
+    assert not (repo_root / ".agentic/claims/APP-1.json").exists()
+    assert (repo_root / ".agentic/claims/archive/APP-1.json").exists()
+    work_item = json.loads((repo_root / ".agentic/work/APP-1.json").read_text(encoding="utf-8"))
+    assert work_item["status"] == "done"
+    review = json.loads((repo_root / ".agentic/reviews/PR-APP-1.json").read_text(encoding="utf-8"))
+    assert review["status"] == "merged"
+
+
+def test_merge_removes_task_worktree(tmp_path: Path, monkeypatch, capsys) -> None:
+    repo_root = tmp_path / "demo-repo"
+    repo_root.mkdir(parents=True)
+    subprocess.run(["git", "init", "-b", "main"], cwd=repo_root, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.email", "mesh@example.com"], cwd=repo_root, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.name", "Agent Mesh Tests"], cwd=repo_root, check=True, capture_output=True)
+    (repo_root / "README.md").write_text("demo\n", encoding="utf-8")
+    subprocess.run(["git", "add", "README.md"], cwd=repo_root, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "initial"], cwd=repo_root, check=True, capture_output=True)
+    monkeypatch.chdir(repo_root)
+
+    run_cli(
+        ["init", "--project-name", "demo", "--project-key", "APP", "--provider", "local",
+         "--adapters", "generic,codex,claude", "--worktree-policy", "required", "--yes"],
+        capsys,
+    )
+    run_cli(["task", "add", "Implement auth endpoint", "--module", "api"], capsys)
+    run_cli(["claim", "APP-1", "--agent", "codex", "--role", "implementer", "--no-push"], capsys)
+
+    claim = json.loads((repo_root / ".agentic/claims/APP-1.json").read_text(encoding="utf-8"))
+    worktree_path = Path(claim["worktree"])
+    assert worktree_path.exists()
+
+    exit_code, output = run_cli(["merge", "APP-1", "--no-push"], capsys)
+
+    assert exit_code == 0
+    assert "Removed worktree:" in output
+    assert not worktree_path.exists()
+    assert not (repo_root / ".agentic/claims/APP-1.json").exists()
+    assert (repo_root / ".agentic/claims/archive/APP-1.json").exists()
+
+
+def test_merge_skips_worktree_removal_when_already_absent(tmp_path: Path, monkeypatch, capsys) -> None:
+    repo_root = tmp_path / "demo-repo"
+    repo_root.mkdir(parents=True)
+    subprocess.run(["git", "init", "-b", "main"], cwd=repo_root, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.email", "mesh@example.com"], cwd=repo_root, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.name", "Agent Mesh Tests"], cwd=repo_root, check=True, capture_output=True)
+    (repo_root / "README.md").write_text("demo\n", encoding="utf-8")
+    subprocess.run(["git", "add", "README.md"], cwd=repo_root, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "initial"], cwd=repo_root, check=True, capture_output=True)
+    monkeypatch.chdir(repo_root)
+
+    run_cli(
+        ["init", "--project-name", "demo", "--project-key", "APP", "--provider", "local",
+         "--adapters", "generic,codex,claude", "--worktree-policy", "required", "--yes"],
+        capsys,
+    )
+    run_cli(["task", "add", "Implement auth endpoint", "--module", "api"], capsys)
+    run_cli(["claim", "APP-1", "--agent", "codex", "--role", "implementer", "--no-push"], capsys)
+
+    # Simulate worktree already removed (e.g. by a previous partial merge)
+    claim_data = json.loads((repo_root / ".agentic/claims/APP-1.json").read_text(encoding="utf-8"))
+    worktree_path = Path(claim_data["worktree"])
+    subprocess.run(["git", "worktree", "remove", "--force", str(worktree_path)], cwd=repo_root, check=True, capture_output=True)
+    assert not worktree_path.exists()
+
+    exit_code, output = run_cli(["merge", "APP-1", "--no-push"], capsys)
+
+    assert exit_code == 0
+    assert "Worktree already absent" in output
+    assert "Marked APP-1 done" in output
+
+
+def test_merge_errors_on_missing_claim(tmp_path: Path, monkeypatch, capsys) -> None:
+    repo_root = init_repo(tmp_path, monkeypatch, capsys)
+    run_cli(["task", "add", "Implement auth endpoint", "--module", "api"], capsys)
+
+    exit_code, output = run_cli(["merge", "APP-1", "--no-push"], capsys)
+
+    assert exit_code == 1
+    assert "no active claim" in output

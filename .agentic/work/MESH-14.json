@@ -1,0 +1,28 @@
+{
+  "schema_version": "0.1",
+  "id": "MESH-14",
+  "title": "Add adversarial review mode to the review skill",
+  "description": "Extend the review skill to support two modes: confirmatory (default) and adversarial. Adversarial mode treats the implementation as guilty until proven innocent — it enumerates attack surface, probes edge cases, challenges weak acceptance criteria, and checks for missing error paths. The review mode is determined by task kind and risk level per ADR 0003. Adversarial review runs as a fresh session with no shared context from the implementation session.",
+  "kind": "feature",
+  "status": "ready",
+  "execution": "afk_safe",
+  "module": "coordination",
+  "planning": {
+    "provider": "local",
+    "url": null,
+    "external_id": null
+  },
+  "prd": null,
+  "acceptance_criteria": [
+    "kind: security is a valid task kind in the work item schema",
+    "The review workflow selects adversarial mode for kind: security tasks and both passes for risk: high tasks",
+    "Adversarial mode produces a bounded attack report: what was attempted, what survived, what failed",
+    "Adversarial review session receives no implementation reasoning or evidence — only the diff and task definition",
+    "Confirmatory pass always runs before adversarial pass when both are required",
+    "Review packet records which mode(s) were applied"
+  ],
+  "dependencies": [],
+  "risk": "medium",
+  "created_at": "2026-05-18T22:00:00Z",
+  "updated_at": "2026-05-18T22:00:00Z"
+}

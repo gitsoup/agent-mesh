@@ -167,8 +167,10 @@ def handle_version(_: argparse.Namespace) -> int:
 
 
 def handle_init(args: argparse.Namespace) -> int:
+    from agent_mesh.config import load_project_config
     from agent_mesh.scaffold import init_repo
     from agent_mesh.state.storage import resolve_repo_root
+    from agent_mesh.topology import ensure_coordination_worktree
 
     repo_root = resolve_repo_root(Path.cwd())
     project_name = args.project_name or repo_root.name
@@ -190,6 +192,18 @@ def handle_init(args: argparse.Namespace) -> int:
     emit("Initialized Agent Mesh in {0}".format(repo_root))
     emit("Created {0} files.".format(len(result.created)))
     emit("Skipped {0} existing files.".format(len(result.skipped)))
+    if args.worktree_policy != "off" and git_head_available(repo_root):
+        try:
+            coordination = ensure_coordination_worktree(repo_root, load_project_config(repo_root))
+            emit(
+                "Coordination worktree {0}: {1} @ {2}".format(
+                    coordination.action,
+                    coordination.branch,
+                    coordination.path,
+                )
+            )
+        except RuntimeError as error:
+            emit("WARN: {0}".format(error))
     return 0
 
 
@@ -210,14 +224,26 @@ def handle_doctor(_: argparse.Namespace) -> int:
 def handle_status(_: argparse.Namespace) -> int:
     from agent_mesh.config import load_project_config
     from agent_mesh.state.storage import list_claims, list_reviews, list_work_items, resolve_repo_root
+    from agent_mesh.topology import inspect_coordination_worktree
 
     repo_root = resolve_repo_root(Path.cwd())
     config = load_project_config(repo_root)
     work_items = list_work_items(repo_root)
     claims = list_claims(repo_root)
     reviews = list_reviews(repo_root)
+    coordination = inspect_coordination_worktree(repo_root, config)
 
     emit("Project: {0} ({1})".format(config.project_name, config.project_key))
+    emit("Shared root: {0}".format(repo_root))
+    emit(
+        "Coordination: {0} @ {1} [{2}]".format(
+            coordination.branch,
+            coordination.path,
+            coordination.state,
+        )
+    )
+    if coordination.detail:
+        emit("Coordination detail: {0}".format(coordination.detail))
     emit("Tasks: {0}".format(len(work_items)))
     for line in summarize_work_items(work_items):
         emit(line)
@@ -399,14 +425,15 @@ def handle_pr(args: argparse.Namespace) -> int:
     emit(body)
 
     review_packet = create_review_packet(config, work_item, claim)
-    save_model_json(repo_root / ".agentic/reviews" / "{0}.json".format(review_packet.id), review_packet)
+    review_packet_path = repo_root / ".agentic/reviews" / "{0}.json".format(review_packet.id)
+    save_model_json(review_packet_path, review_packet)
 
     work_item.status = "pr_open"
     work_item.updated_at = utc_now()
     save_model_json(repo_root / ".agentic/work" / "{0}.json".format(args.work_id), work_item)
 
     if args.dry_run:
-        emit("Dry-run: review packet written to .agentic/reviews/{0}.json".format(review_packet.id))
+        emit("Dry-run: review packet written to {0}".format(review_packet_path))
     return 0
 
 
@@ -420,8 +447,9 @@ def handle_review_packet(args: argparse.Namespace) -> int:
     work_item = load_model(repo_root / ".agentic/work" / "{0}.json".format(args.work_id), WorkItem)
     claim = load_model(repo_root / ".agentic/claims" / "{0}.json".format(args.work_id), Claim)
     review_packet = create_review_packet(config, work_item, claim)
-    save_model_json(repo_root / ".agentic/reviews" / "{0}.json".format(review_packet.id), review_packet)
-    emit("Wrote review packet {0}".format(review_packet.id))
+    review_packet_path = repo_root / ".agentic/reviews" / "{0}.json".format(review_packet.id)
+    save_model_json(review_packet_path, review_packet)
+    emit("Wrote review packet {0}".format(review_packet_path))
     return 0
 
 
@@ -484,9 +512,23 @@ def handle_dashboard_build(_: argparse.Namespace) -> int:
 def handle_sync(_: argparse.Namespace) -> int:
     from agent_mesh.config import load_project_config
     from agent_mesh.state.storage import resolve_repo_root
+    from agent_mesh.topology import ensure_coordination_worktree
 
     repo_root = resolve_repo_root(Path.cwd())
     config = load_project_config(repo_root)
+    if config.coordination.worktree_policy != "off" and git_head_available(repo_root):
+        try:
+            coordination = ensure_coordination_worktree(repo_root, config)
+            emit(
+                "Coordination worktree {0}: {1} @ {2}".format(
+                    coordination.action,
+                    coordination.branch,
+                    coordination.path,
+                )
+            )
+        except RuntimeError as error:
+            emit("ERROR: {0}".format(error))
+            return 1
     if config.dashboard.enabled:
         handle_dashboard_build(argparse.Namespace())
     return handle_doctor(argparse.Namespace())
@@ -499,6 +541,11 @@ def derive_project_key(project_name: str) -> str:
 
 def parse_csv(raw: str) -> List[str]:
     return [item.strip() for item in raw.split(",") if item.strip()]
+
+
+def git_head_available(repo_root: Path) -> bool:
+    result = run_git(repo_root, ["rev-parse", "--verify", "HEAD"])
+    return result.returncode == 0
 
 
 def resolve_review_packet_path(repo_root: Path, target: str) -> Optional[Path]:

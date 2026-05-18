@@ -18,11 +18,14 @@ class PlanningConfig(BaseModel):
 
 class CoordinationConfig(BaseModel):
     strategy: str = "git_files"
+    branch: str = "mesh/state"
     work_dir: str = ".agentic/work"
     claims_dir: str = ".agentic/claims"
     reviews_dir: str = ".agentic/reviews"
+    handoffs_dir: str = ".agentic/handoffs"
     worktree_policy: str = "required"
     worktree_root: Optional[str] = None
+    coordination_worktree: Optional[str] = None
     claim_stale_after_minutes: int = 120
 
 

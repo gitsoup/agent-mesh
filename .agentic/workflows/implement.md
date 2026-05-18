@@ -13,5 +13,9 @@ claims, reviews, and handoffs before proceeding.
 2. Plan the smallest vertical slice.
 3. Add or update tests.
 4. Implement and run verification.
-5. Record evidence.
-6. Stop before opening a PR.
+5. Inspect `git diff` and `git status` in the claimed workspace.
+6. Remove obvious accidental files, debug leftovers, and unrelated edits before
+   handing off to `/pr`.
+7. Record evidence, including the commands run and their outcomes.
+8. Stop only when the task branch is in a deliberate reviewable state, then
+   hand off to `/pr` instead of opening a PR directly.

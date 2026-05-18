@@ -14,11 +14,19 @@ The project now includes:
 - a Python package scaffold
 - a `mesh` CLI entrypoint
 - initial Pydantic config/state models
+- explicit shared-root, task-worktree, and `mesh/state` coordination-topology metadata
 - baseline tests for installability and config/state validation
 
 ## Development
 
-Create a virtualenv, install the package in editable mode, and run tests:
+Use `uv` for local development and agent execution:
+
+```bash
+uv sync --extra dev
+uv run pytest
+```
+
+Fallback if `uv` is unavailable:
 
 ```bash
 python -m venv .venv

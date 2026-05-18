@@ -66,6 +66,7 @@ Use Python for the CLI/TUI unless the existing repo already strongly prefers ano
 Recommended stack:
 
 - Python 3.11+
+- uv for environment and command execution
 - Typer for CLI commands
 - Rich for terminal output
 - Textual for optional TUI screens
@@ -105,7 +106,7 @@ README.md
 A user should be able to run:
 
 ```bash
-pip install -e .
+uv sync
 mesh init
 mesh doctor
 mesh skill list

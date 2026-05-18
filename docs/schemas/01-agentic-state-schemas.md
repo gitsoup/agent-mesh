@@ -16,11 +16,14 @@ Use Pydantic models in implementation and JSON files in target repos.
   },
   "coordination": {
     "strategy": "git_files",
+    "branch": "mesh/state",
     "work_dir": ".agentic/work",
     "claims_dir": ".agentic/claims",
     "reviews_dir": ".agentic/reviews",
+    "handoffs_dir": ".agentic/handoffs",
     "worktree_policy": "required",
     "worktree_root": null,
+    "coordination_worktree": null,
     "claim_stale_after_minutes": 120
   },
   "adapters": ["generic", "codex", "claude"],
@@ -97,7 +100,7 @@ Use Pydantic models in implementation and JSON files in target repos.
 ```json
 {
   "kind": "test",
-  "command": "pytest tests/api/test_auth.py",
+  "command": "uv run pytest tests/api/test_auth.py",
   "result": "passed",
   "summary": "6 tests passed",
   "created_at": "2026-05-17T00:00:00Z"
@@ -159,6 +162,15 @@ Notes:
 - Active claims live under `.agentic/claims/`.
 - Completed or superseded claims should move to `.agentic/claims/archive/` so
   active status only reflects current ownership.
+- The shared root stays on `main`; live coordination state is intended to move
+  to the `mesh/state` branch in a dedicated coordination worktree.
+- `coordination_worktree` may be set explicitly. If it is unset, the default
+  expected path is `<worktree_root>/<repo>-mesh-state` when `worktree_root` is
+  configured, otherwise a sibling checkout named `<repo>-mesh-state`.
+- A missing coordination worktree is a recoverable bootstrap state. A present
+  coordination worktree must be a git worktree checked out on `mesh/state`.
+- `mesh init` should create the coordination worktree for real git repos when
+  worktrees are enabled. `mesh sync` should recreate it when it is missing.
 
 Review statuses:
 

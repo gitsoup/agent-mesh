@@ -13,6 +13,7 @@ tests/
 
 Add dependencies:
 
+- uv
 - typer
 - rich
 - textual optional
@@ -139,9 +140,7 @@ Write README with:
 In a temp directory:
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -e .
+uv sync
 mkdir /tmp/demo-agent-mesh && cd /tmp/demo-agent-mesh
 git init
 mesh init --project-name demo --project-key APP --provider local --adapters generic,codex,claude --yes
@@ -155,3 +154,17 @@ mesh dashboard build
 ```
 
 All commands should complete successfully.
+
+## Coordination topology follow-up
+
+Agent Mesh now models an explicit coordination branch and expected coordination
+worktree path. The current status/doctor flows should be able to:
+
+- show the shared root and expected `mesh/state` worktree path
+- create the coordination worktree during `mesh init` when the repo is a real
+  git checkout with worktrees enabled
+- recreate the coordination worktree during `mesh sync` when it is missing
+- detect whether the coordination worktree is missing, dirty, or on the wrong
+  branch
+- preserve task worktree isolation while live-state routing work lands in later
+  phases

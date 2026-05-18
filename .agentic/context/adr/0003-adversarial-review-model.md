@@ -17,12 +17,19 @@ reviewer operates from a different premise: assume the implementation is
 wrong and find the proof. These two roles catch different failure classes
 and are complementary, not alternatives.
 
-Two problems with a naive "always adversarial" approach:
+Three problems with relying solely on task labels to trigger adversarial review:
 
 1. **Risk field is self-assessed.** If the task creator underestimates
    risk, adversarial review never triggers. Risk level alone is an
    unreliable trigger.
-2. **Same model, same blind spots.** An adversarial reviewer sharing
+2. **Risk reflects complexity, not blast radius.** A 50-line feature that
+   calls `git push --delete` and `shutil.move` can be labeled `risk: low`
+   because its implementation scope is small, yet carry high destructive
+   potential. These are independent dimensions. MESH-12 (`risk: low`)
+   demonstrated this: an adversarial pass found 3 ship-blockers including
+   silent deletion of unmerged code that a confirmatory review would have
+   passed.
+3. **Same model, same blind spots.** An adversarial reviewer sharing
    weights with the implementer has identical blind spots. The closest
    approximation to true independence is a fresh session with no shared
    implementation context.
@@ -43,8 +50,18 @@ is independent of risk level and requires its own trigger.
 | `risk: high` (any kind except security) | Confirmatory, then adversarial |
 | All other tasks | Confirmatory only |
 
-The reviewer agent may escalate to adversarial independently after
-reading the diff, even if the task profile does not require it.
+The reviewer agent **must escalate to adversarial** after reading the
+diff when it detects any of the following, regardless of task profile:
+
+- Destructive git operations (`push --delete`, `branch -D`, `worktree remove`)
+- File deletion or moves (`shutil.move`, `unlink`, `rmdir`, `rm -rf`)
+- State mutations without a rollback or recovery path
+- Subprocess calls that modify external state
+- Error handling that silently swallows failures or maps distinct errors
+  to the same output
+
+Escalation is a **must**, not a judgment call, when these patterns are
+present in the diff.
 
 ### Adversarial review constraints
 
@@ -79,13 +96,15 @@ reading the diff, even if the task profile does not require it.
 
 ### Costs
 
-- `risk: high` tasks require two review passes, increasing review cost
-  and latency
+- `risk: high` and diff-triggered tasks require two review passes,
+  increasing review cost and latency
 - Fresh-session constraint means the adversarial reviewer must re-derive
   context from the diff — potentially slower and noisier than a
   context-sharing approach
 - Perverse incentive exists to mark tasks `risk: medium` to avoid the
-  dual-pass overhead; mitigated by allowing reviewer-initiated escalation
+  dual-pass overhead; mitigated by mandatory reviewer-initiated escalation
+  on destructive diff patterns — the reviewer cannot be opted out of
+  escalation by a low risk label
 
 ### Follow-up implications
 

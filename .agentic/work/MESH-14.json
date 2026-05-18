@@ -2,7 +2,7 @@
   "schema_version": "0.1",
   "id": "MESH-14",
   "title": "Add adversarial review mode to the review skill",
-  "description": "Extend the review skill to support two modes: confirmatory (default) and adversarial. Adversarial mode treats the implementation as guilty until proven innocent — it enumerates attack surface, probes edge cases, challenges weak acceptance criteria, and checks for missing error paths. The review mode is determined by task kind and risk level per ADR 0003. Adversarial review runs as a fresh session with no shared context from the implementation session.",
+  "description": "Extend the review skill to support two modes: confirmatory (default) and adversarial. Adversarial mode treats the implementation as guilty until proven innocent — it enumerates attack surface, probes edge cases, challenges weak acceptance criteria, and checks for missing error paths. The review mode is determined by task kind, risk level, AND diff-pattern detection per ADR 0003. When the diff contains destructive git operations, file deletions/moves, state mutations without rollback, or error handling that swallows failures, the reviewer must escalate to adversarial regardless of task label. Adversarial review runs as a fresh session with no shared context from the implementation session.",
   "kind": "feature",
   "status": "ready",
   "execution": "afk_safe",
@@ -16,6 +16,7 @@
   "acceptance_criteria": [
     "kind: security is a valid task kind in the work item schema",
     "The review workflow selects adversarial mode for kind: security tasks and both passes for risk: high tasks",
+    "Reviewer must escalate to adversarial when the diff contains: destructive git ops, file deletion/moves, state mutations without rollback, or error handling that silently swallows failures — regardless of task risk label",
     "Adversarial mode produces a bounded attack report: what was attempted, what survived, what failed",
     "Adversarial review session receives no implementation reasoning or evidence — only the diff and task definition",
     "Confirmatory pass always runs before adversarial pass when both are required",
@@ -24,5 +25,5 @@
   "dependencies": [],
   "risk": "medium",
   "created_at": "2026-05-18T22:00:00Z",
-  "updated_at": "2026-05-18T22:00:00Z"
+  "updated_at": "2026-05-18T22:30:00Z"
 }

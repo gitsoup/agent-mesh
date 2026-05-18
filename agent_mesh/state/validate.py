@@ -146,7 +146,7 @@ def validate_relationships(repo_root: Path) -> list[str]:
     for review in reviews:
         if review.work_id not in work_items:
             errors.append(f"Review references missing work item: {review.work_id}")
-        if not (repo_root / review.context.claim).exists():
+        if review.status != "merged" and not (repo_root / review.context.claim).exists():
             errors.append(f"Review references missing claim file: {review.context.claim}")
         if not (repo_root / review.context.work_item).exists():
             errors.append(f"Review references missing work file: {review.context.work_item}")

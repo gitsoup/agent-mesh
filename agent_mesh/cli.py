@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Iterable, List, Optional, Sequence
 
 from agent_mesh import __version__
+from agent_mesh.config import PROJECT_FILE
 from agent_mesh.skills.catalog import SKILLS
 from agent_mesh.utils.slug import slugify
 
@@ -257,9 +258,44 @@ def handle_status(_: argparse.Namespace) -> int:
 
 
 def handle_skill_list(_: argparse.Namespace) -> int:
+    from agent_mesh.config import load_project_config
+    from agent_mesh.state.storage import resolve_repo_root
+
+    try:
+        repo_root = resolve_repo_root(Path.cwd())
+    except FileNotFoundError:
+        repo_root = None
+
+    if repo_root is None or not (repo_root / PROJECT_FILE).exists():
+        for skill in SKILLS:
+            emit("{0}\t{1}".format(skill.name, skill.summary))
+        return 0
+
+    config = load_project_config(repo_root)
+    adapter_columns = ["canonical"] + [adapter for adapter in config.adapters if adapter != "generic"]
+    emit("skill\tsummary\t{0}".format("\t".join(adapter_columns)))
     for skill in SKILLS:
-        emit("{0}\t{1}".format(skill.name, skill.summary))
+        statuses = ["ok"]
+        for adapter in adapter_columns[1:]:
+            statuses.append(skill_install_status(repo_root, adapter, skill.name))
+        emit("{0}\t{1}\t{2}".format(skill.name, skill.summary, "\t".join(statuses)))
     return 0
+
+
+def skill_install_status(repo_root: Path, adapter: str, skill_name: str) -> str:
+    if adapter == "claude":
+        return "installed" if (repo_root / ".claude/skills" / skill_name / "SKILL.md").exists() else "missing"
+    if adapter == "codex":
+        return "installed" if (repo_root / ".agents/skills" / skill_name / "SKILL.md").exists() else "missing"
+    if adapter == "pi":
+        return "installed" if (repo_root / ".agents/skills" / skill_name / "SKILL.md").exists() else "missing"
+    if adapter == "cursor":
+        return "installed" if (repo_root / ".cursor/rules/agent-mesh.mdc").exists() else "missing"
+    if adapter == "opencode":
+        return "installed" if (repo_root / "OPENCODE.md").exists() else "missing"
+    if adapter == "windsurf":
+        return "installed" if (repo_root / ".windsurfrules").exists() else "missing"
+    return "unknown"
 
 
 def handle_adapter_list(_: argparse.Namespace) -> int:

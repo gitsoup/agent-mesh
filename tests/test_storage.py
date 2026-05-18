@@ -37,13 +37,32 @@ def test_resolve_repo_root_uses_primary_worktree_for_linked_worktree(tmp_path: P
     repo_root = tmp_path / "repo"
     linked_worktree = tmp_path / "repo-linked"
     repo_root.mkdir(parents=True)
-    subprocess.run(["git", "init", "-b", "main"], cwd=repo_root, check=True, capture_output=True)
-    subprocess.run(["git", "config", "user.email", "mesh@example.com"], cwd=repo_root, check=True, capture_output=True)
-    subprocess.run(["git", "config", "user.name", "Agent Mesh Tests"], cwd=repo_root, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "init", "-b", "main"], cwd=repo_root, check=True, capture_output=True
+    )
+    subprocess.run(
+        ["git", "config", "user.email", "mesh@example.com"],
+        cwd=repo_root,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Agent Mesh Tests"],
+        cwd=repo_root,
+        check=True,
+        capture_output=True,
+    )
     (repo_root / "README.md").write_text("demo\n", encoding="utf-8")
     subprocess.run(["git", "add", "README.md"], cwd=repo_root, check=True, capture_output=True)
-    subprocess.run(["git", "commit", "-m", "initial"], cwd=repo_root, check=True, capture_output=True)
-    subprocess.run(["git", "worktree", "add", str(linked_worktree)], cwd=repo_root, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "initial"], cwd=repo_root, check=True, capture_output=True
+    )
+    subprocess.run(
+        ["git", "worktree", "add", str(linked_worktree)],
+        cwd=repo_root,
+        check=True,
+        capture_output=True,
+    )
 
     assert resolve_repo_root(linked_worktree) == repo_root
 
@@ -112,7 +131,6 @@ def test_validate_state_tree_rejects_wrong_branch_coordination_worktree(tmp_path
     subprocess.run(["git", "add", "README.md"], cwd=repo_root, check=True, capture_output=True)
     subprocess.run(["git", "commit", "-m", "initial"], cwd=repo_root, check=True, capture_output=True)
     subprocess.run(["git", "worktree", "add", str(coordination_root)], cwd=repo_root, check=True, capture_output=True)
-
     project_file = repo_root / ".agentic" / "project.json"
     project_file.parent.mkdir(parents=True)
     for required_path in [
@@ -149,3 +167,32 @@ def test_inspect_coordination_worktree_reports_missing_path(tmp_path: Path) -> N
 
     assert status.branch == "mesh/state"
     assert status.state == "missing"
+
+
+def test_validate_state_tree_reports_missing_codex_adapter_artifacts(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    (repo_root / ".git").mkdir(parents=True)
+    project_file = repo_root / ".agentic" / "project.json"
+    project_file.parent.mkdir(parents=True)
+    for required_path in [
+        repo_root / ".agentic/context",
+        repo_root / ".agentic/work",
+        repo_root / ".agentic/claims",
+        repo_root / ".agentic/reviews",
+        repo_root / ".agentic/workflows",
+        repo_root / ".agentic/skills",
+    ]:
+        required_path.mkdir(parents=True, exist_ok=True)
+    (repo_root / ".agentic/context/CONTEXT.md").write_text("# Context\n", encoding="utf-8")
+    (repo_root / ".agentic/context/CONTEXT-MAP.md").write_text("# Context Map\n", encoding="utf-8")
+    project_file.write_text(
+        ProjectConfig(
+            project_name="demo", project_key="APP", adapters=["generic", "codex"]
+        ).to_json(),
+        encoding="utf-8",
+    )
+
+    errors = validate_state_tree(repo_root)
+
+    assert errors
+    assert "Missing adapter artifact directory for codex: .agents/skills" in errors

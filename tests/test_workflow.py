@@ -86,6 +86,41 @@ def test_init_rerun_skips_existing_files_without_force(tmp_path: Path, monkeypat
     assert agents_path.read_text(encoding="utf-8") == "custom instructions\n"
 
 
+def test_skill_list_shows_adapter_install_status_in_configured_repo(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    repo_root = init_repo(tmp_path, monkeypatch, capsys)
+
+    exit_code, output = run_cli(["skill", "list"], capsys)
+
+    assert exit_code == 0
+    assert "skill\tsummary\tcanonical\tcodex\tclaude" in output
+    assert (
+        "claim\tClaim a ready work item and prepare implementation context.\tok\tinstalled\tinstalled"
+        in output
+    )
+    assert (
+        "diagnose\tDebug using a disciplined diagnosis loop.\tok\tinstalled\tinstalled"
+        in output
+    )
+    assert repo_root.exists()
+
+
+def test_skill_list_reports_missing_codex_wrapper_in_configured_repo(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    repo_root = init_repo(tmp_path, monkeypatch, capsys)
+    (repo_root / ".agents/skills/claim/SKILL.md").unlink()
+
+    exit_code, output = run_cli(["skill", "list"], capsys)
+
+    assert exit_code == 0
+    assert (
+        "claim\tClaim a ready work item and prepare implementation context.\tok\tmissing\tinstalled"
+        in output
+    )
+
+
 def test_doctor_status_and_task_lifecycle(tmp_path: Path, monkeypatch, capsys) -> None:
     repo_root = init_repo(tmp_path, monkeypatch, capsys)
 
@@ -635,3 +670,17 @@ def test_doctor_reports_cross_file_errors(tmp_path: Path, monkeypatch, capsys) -
     exit_code, output = run_cli(["doctor"], capsys)
     assert exit_code == 1
     assert "Claim references missing work item: APP-404" in output
+
+
+def test_skill_list_falls_back_to_catalog_outside_configured_repo(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    repo_root = tmp_path / "demo-repo"
+    (repo_root / ".git").mkdir(parents=True)
+    monkeypatch.chdir(repo_root)
+
+    exit_code, output = run_cli(["skill", "list"], capsys)
+
+    assert exit_code == 0
+    assert "skill\tsummary\tcanonical" not in output
+    assert "claim\tClaim a ready work item and prepare implementation context." in output

@@ -4,7 +4,7 @@
   "title": "Design mesh/state coordination branch and worktree topology",
   "description": "Define how Agent Mesh creates, discovers, and uses a dedicated coordination worktree on the mesh/state branch while keeping the shared root on main.",
   "kind": "feature",
-  "status": "ready",
+  "status": "done",
   "execution": "afk_safe",
   "module": "coordination",
   "planning": {
@@ -23,5 +23,5 @@
   ],
   "risk": "high",
   "created_at": "2026-05-17T17:40:00Z",
-  "updated_at": "2026-05-17T17:40:00Z"
+  "updated_at": "2026-05-18T15:58:34Z"
 }

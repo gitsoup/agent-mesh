@@ -4,7 +4,7 @@
   "title": "Remove task worktree and branch on mesh merge",
   "description": "After a task branch is merged, the task worktree and remote branch become stale. mesh merge should remove the task worktree (git worktree remove) and delete the remote task branch as part of the merge lifecycle, keeping git worktree list clean and preventing dangling branch references.",
   "kind": "feature",
-  "status": "ready",
+  "status": "done",
   "execution": "afk_safe",
   "module": "cli",
   "planning": {
@@ -23,5 +23,5 @@
   "dependencies": [],
   "risk": "low",
   "created_at": "2026-05-18T00:00:00Z",
-  "updated_at": "2026-05-18T00:00:00Z"
+  "updated_at": "2026-05-18T22:31:52Z"
 }

@@ -150,6 +150,13 @@ def build_parser() -> argparse.ArgumentParser:
     sync_parser = subparsers.add_parser("sync", help="Refresh local status artifacts.")
     sync_parser.set_defaults(func=handle_sync)
 
+    merge_parser = subparsers.add_parser("merge", help="Finalize a merged work item and clean up.")
+    merge_parser.add_argument("work_id", help="Work item ID (e.g. APP-1).")
+    merge_parser.add_argument("--no-push", action="store_true", help="Skip remote branch deletion.")
+    merge_parser.add_argument("--skip-merge-check", action="store_true", help="Skip check that branch is merged into default branch.")
+    merge_parser.add_argument("--discard-uncommitted", action="store_true", help="Remove worktree even if it has uncommitted changes.")
+    merge_parser.set_defaults(func=handle_merge)
+
     return parser
 
 
@@ -543,6 +550,135 @@ def handle_dashboard_build(_: argparse.Namespace) -> int:
     output_path.write_text(render_dashboard_html(config, work_items, claims, reviews), encoding="utf-8")
     emit("Built dashboard at {0}".format(output_path))
     return 0
+
+
+def handle_merge(args: argparse.Namespace) -> int:
+    import shutil
+
+    from agent_mesh.config import load_project_config
+    from agent_mesh.state.models import Claim, WorkItem
+    from agent_mesh.state.storage import load_model, resolve_repo_root, save_model_json
+    from agent_mesh.topology import resolve_coordination_worktree_path
+
+    repo_root = resolve_repo_root(Path.cwd())
+    config = load_project_config(repo_root)
+    warnings_fired = False
+
+    work_path = repo_root / ".agentic/work" / "{0}.json".format(args.work_id)
+    if not work_path.exists():
+        emit("ERROR: work item {0} not found".format(args.work_id))
+        return 1
+    work_item = load_model(work_path, WorkItem)
+
+    claim_path = repo_root / ".agentic/claims" / "{0}.json".format(args.work_id)
+    if not claim_path.exists():
+        emit("ERROR: no active claim for {0}".format(args.work_id))
+        return 1
+    claim = load_model(claim_path, Claim)
+
+    # Guard: verify branch is merged into default branch before destroying anything
+    if claim.branch and not getattr(args, "skip_merge_check", False):
+        base = config.default_branch
+        result = run_git(repo_root, ["branch", "--merged", "origin/{0}".format(base), "--list", claim.branch])
+        if result.returncode != 0 or claim.branch not in result.stdout:
+            emit(
+                "ERROR: branch {0} does not appear merged into {1}. "
+                "Merge the PR first, or use --skip-merge-check to override.".format(
+                    claim.branch, base
+                )
+            )
+            return 1
+
+    coordination_worktree = resolve_coordination_worktree_path(repo_root, config)
+
+    # Remove task worktree if it exists and is not the coordination worktree
+    if config.coordination.worktree_policy != "off" and claim.worktree:
+        worktree_path = Path(claim.worktree).resolve()
+        if worktree_path == coordination_worktree.resolve():
+            emit("ERROR: claim worktree matches the coordination worktree — refusing to remove it")
+            return 1
+        if worktree_path.exists() and (worktree_path / ".git").exists():
+            dirty = run_git(worktree_path, ["status", "--porcelain"])
+            if dirty.returncode == 0 and dirty.stdout.strip():
+                if not getattr(args, "discard_uncommitted", False):
+                    emit(
+                        "ERROR: worktree {0} has uncommitted changes. "
+                        "Commit or stash them, or use --discard-uncommitted to discard.".format(worktree_path)
+                    )
+                    return 1
+                emit("Discarding uncommitted changes in worktree {0} (--discard-uncommitted)".format(worktree_path))
+            result = run_git(repo_root, ["worktree", "remove", "--force", str(worktree_path)])
+            if result.returncode == 0:
+                emit("Removed worktree: {0}".format(worktree_path))
+            else:
+                emit("WARNING: could not remove worktree {0}: {1}".format(
+                    worktree_path, (result.stderr or result.stdout).strip()
+                ))
+                warnings_fired = True
+        else:
+            emit("Worktree already absent: {0}".format(claim.worktree))
+
+    # Delete remote branch
+    if claim.branch and not args.no_push:
+        result = run_git(repo_root, ["push", "origin", "--delete", claim.branch])
+        if result.returncode == 0:
+            emit("Deleted remote branch: {0}".format(claim.branch))
+        else:
+            detail = (result.stderr or result.stdout).strip()
+            if "remote ref does not exist" in detail:
+                emit("Remote branch already absent: {0}".format(claim.branch))
+            else:
+                emit("WARNING: could not delete remote branch {0}: {1}".format(claim.branch, detail))
+                warnings_fired = True
+
+    # Delete local branch (force since merge happened on remote via PR)
+    if claim.branch and branch_exists(repo_root, claim.branch):
+        result = run_git(repo_root, ["branch", "-D", claim.branch])
+        if result.returncode == 0:
+            emit("Deleted local branch: {0}".format(claim.branch))
+        else:
+            emit("WARNING: could not delete local branch {0}: {1}".format(
+                claim.branch, (result.stderr or result.stdout).strip()
+            ))
+            warnings_fired = True
+
+    # Update review packet status to merged if one exists
+    review_packet_path = repo_root / ".agentic/reviews" / "PR-{0}.json".format(args.work_id)
+    if review_packet_path.exists():
+        from agent_mesh.state.models import ReviewPacket
+        review = load_model(review_packet_path, ReviewPacket)
+        review.status = "merged"
+        save_model_json(review_packet_path, review)
+        emit("Marked review packet merged: PR-{0}".format(args.work_id))
+    else:
+        emit("WARNING: no review packet found for {0} — dashboard may show stale review state".format(args.work_id))
+        warnings_fired = True
+
+    # Mark work item done first — safer order: if archive fails, work item is
+    # already done and the live claim can be retried
+    now = utc_now()
+    work_item.status = "done"
+    work_item.updated_at = now
+    save_model_json(work_path, work_item)
+    emit("Marked {0} done".format(args.work_id))
+
+    # Archive the claim last
+    archive_dir = repo_root / ".agentic/claims/archive"
+    archive_dir.mkdir(parents=True, exist_ok=True)
+    archive_path = archive_dir / "{0}.json".format(args.work_id)
+    try:
+        shutil.move(str(claim_path), str(archive_path))
+        emit("Archived claim: {0}".format(archive_path.name))
+    except FileNotFoundError:
+        emit("WARNING: claim file already moved by a concurrent process — skipping archive")
+        warnings_fired = True
+
+    if config.dashboard.enabled and not warnings_fired:
+        handle_dashboard_build(argparse.Namespace())
+    elif config.dashboard.enabled:
+        emit("Skipped dashboard rebuild due to warnings — run mesh sync to rebuild")
+
+    return 2 if warnings_fired else 0
 
 
 def handle_sync(_: argparse.Namespace) -> int:

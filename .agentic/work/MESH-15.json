@@ -1,0 +1,25 @@
+{
+  "schema_version": "0.1",
+  "id": "MESH-15",
+  "title": "mesh merge crashes on dashboard rebuild when called from task worktree",
+  "description": "When mesh merge is run from inside the task worktree, the command removes that worktree as part of cleanup. The dashboard rebuild step that follows calls Path.cwd() which then raises FileNotFoundError because the process working directory no longer exists. The fix is to resolve the repo root from the coordination worktree path or a stored absolute path before removing the worktree, rather than relying on cwd() at rebuild time.",
+  "kind": "bug",
+  "status": "ready",
+  "execution": "afk_safe",
+  "module": "cli",
+  "planning": {
+    "provider": "local",
+    "url": null,
+    "external_id": null
+  },
+  "prd": null,
+  "acceptance_criteria": [
+    "mesh merge completes successfully including dashboard rebuild when run from inside the task worktree",
+    "Path.cwd() is not called after the worktree has been removed",
+    "Existing merge tests continue to pass"
+  ],
+  "dependencies": [],
+  "risk": "low",
+  "created_at": "2026-05-18T22:30:00Z",
+  "updated_at": "2026-05-18T22:30:00Z"
+}

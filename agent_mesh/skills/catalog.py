@@ -29,4 +29,5 @@ SKILLS: List[SkillDefinition] = [
     SkillDefinition("refactor", "Improve structure while preserving behavior."),
     SkillDefinition("handoff", "Create compact continuation context for another session."),
     SkillDefinition("sync", "Sync repo, claims, and dashboard state."),
+    SkillDefinition("ongoing", "Inspect and continue work in a repo that already uses Agent Mesh."),
 ]

@@ -24,11 +24,28 @@
     ]
   },
   "evidence": [
-    "uv run pytest -q → 43 passed in 31s (all existing tests pass, new regression test added)",
-    "New test test_merge_from_inside_task_worktree_completes_dashboard_rebuild confirms the exact failure path now succeeds",
-    "build_dashboard(repo_root) replaces handle_dashboard_build(argparse.Namespace()) at both call sites in handle_merge and handle_sync — Path.cwd() is never called after worktree removal",
-    "Dashboard redesign verified visually in browser: dark gradient header, progress bar, color badges, interactive filter buttons, expandable task rows"
+    {
+      "kind": "test",
+      "command": "uv run pytest -q",
+      "result": "43 passed in 31s",
+      "summary": "All existing tests pass; new regression test added",
+      "created_at": "2026-05-18T22:50:00Z"
+    },
+    {
+      "kind": "test",
+      "command": "test_merge_from_inside_task_worktree_completes_dashboard_rebuild",
+      "result": "pass",
+      "summary": "Regression test: monkeypatch.chdir(worktree) then mesh merge \u2014 confirms no FileNotFoundError and dashboard built",
+      "created_at": "2026-05-18T22:50:00Z"
+    },
+    {
+      "kind": "review",
+      "command": "git diff main..HEAD -- agent_mesh/cli.py",
+      "result": "build_dashboard(repo_root) at both call sites",
+      "summary": "Path.cwd() not called after worktree removal in handle_merge or handle_sync",
+      "created_at": "2026-05-18T22:50:00Z"
+    }
   ],
-  "status": "pending_review",
+  "status": "merged",
   "created_at": "2026-05-18T22:50:53Z"
 }

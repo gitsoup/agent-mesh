@@ -1,0 +1,25 @@
+{
+  "schema_version": "0.1",
+  "id": "MESH-16",
+  "title": "HTML-escape user-controlled fields in dashboard renderer",
+  "description": "render_dashboard_html interpolates task titles, IDs, status, kind, and module directly into HTML via .format() with no escaping. A task title containing '<', '>', or '\"' would break the HTML structure. The fix is a html.escape() pass on all user-supplied values before interpolation. Pre-existing issue surfaced during MESH-15 review; the redesign added more injection points.",
+  "kind": "bug",
+  "status": "ready",
+  "execution": "afk_safe",
+  "module": "cli",
+  "planning": {
+    "provider": "local",
+    "url": null,
+    "external_id": null
+  },
+  "prd": null,
+  "acceptance_criteria": [
+    "Task titles containing <, >, \", ', and & render safely in the dashboard HTML",
+    "html.escape() applied to all user-supplied string values interpolated into HTML tags and attributes",
+    "Existing dashboard tests continue to pass"
+  ],
+  "dependencies": [],
+  "risk": "low",
+  "created_at": "2026-05-18T22:58:00Z",
+  "updated_at": "2026-05-18T22:58:00Z"
+}

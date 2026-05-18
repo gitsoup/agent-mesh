@@ -1,0 +1,23 @@
+{
+  "schema_version": "0.1",
+  "work_id": "MESH-15",
+  "status": "in_progress",
+  "claimed_by": "agent:codex:C02F80M5ML85",
+  "agent_runtime": "codex",
+  "role": "implementer",
+  "machine": "C02F80M5ML85",
+  "workspace_id": "codex-c02f80m5ml85",
+  "worktree": "/Users/karthick/projects/agent-mesh-codex-c02f80m5ml85",
+  "branch": "feat/MESH-15-mesh-merge-crashes-on-dashboard-rebuild-when-called-from-task-worktree",
+  "claimed_at": "2026-05-18T22:37:07Z",
+  "last_seen": "2026-05-18T22:37:07Z",
+  "evidence": [],
+  "events": [
+    {
+      "action": "claimed",
+      "at": "2026-05-18T22:37:07Z",
+      "by": "agent:codex:C02F80M5ML85",
+      "note": null
+    }
+  ]
+}

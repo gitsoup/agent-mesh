@@ -22,7 +22,7 @@ Route into one of these modes:
 
 - `greenfield`: no meaningful product code/docs yet, and no established coordination state. Start with `/align`, then `/to-prd`, then `/to-tasks`. Use `/setup` only when Agent Mesh has not been initialized yet.
 - `brownfield adoption`: repo has meaningful code/docs/conventions but lacks usable Mesh coordination state. Start with `/setup`, derive durable context from existing artifacts, normalize that context into Mesh state, then continue with `/align`, `/to-prd`, `/to-tasks`, and `/triage` as needed.
-- `ongoing coordination`: `.agentic/` already exists with active or historical work state. Inspect tasks, claims, reviews, and handoffs first. Continue existing work when possible; otherwise claim a ready task and proceed with `/implement`, `/pr`, `/review`, `/address`, `/merge`, or `/handoff`.
+- `ongoing coordination`: `.agentic/` already exists with active or historical work state. Follow `.agentic/workflows/ongoing.md` for the full inspection sequence, claim rules, and continuation protocol.
 
 Guardrails:
 

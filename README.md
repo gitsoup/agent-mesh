@@ -14,6 +14,7 @@ The project now includes:
 - a Python package scaffold
 - a `mesh` CLI entrypoint
 - initial Pydantic config/state models
+- explicit shared-root, task-worktree, and `mesh/state` coordination-topology metadata
 - baseline tests for installability and config/state validation
 
 ## Development

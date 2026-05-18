@@ -16,6 +16,7 @@ from agent_mesh.state.storage import (
     list_work_items,
     load_json,
 )
+from agent_mesh.topology import inspect_coordination_worktree
 
 
 def validate_state_tree(repo_root: Path) -> List[str]:
@@ -25,8 +26,9 @@ def validate_state_tree(repo_root: Path) -> List[str]:
         errors.append("Missing {0}".format(PROJECT_FILE))
         return errors
 
+    config: ProjectConfig | None = None
     try:
-        ProjectConfig.model_validate(load_json(project_file))
+        config = ProjectConfig.model_validate(load_json(project_file))
     except ValidationError as exc:
         errors.append("Invalid .agentic/project.json: {0}".format(exc))
 
@@ -34,6 +36,8 @@ def validate_state_tree(repo_root: Path) -> List[str]:
     errors.extend(validate_directory(repo_root / ".agentic/claims", Claim))
     errors.extend(validate_directory(repo_root / ".agentic/reviews", ReviewPacket))
     errors.extend(validate_required_paths(repo_root))
+    if config is not None:
+        errors.extend(validate_coordination_topology(repo_root, config))
     if not errors:
         errors.extend(validate_relationships(repo_root))
     return errors
@@ -99,3 +103,18 @@ def validate_relationships(repo_root: Path) -> List[str]:
         if not (repo_root / review.context.work_item).exists():
             errors.append("Review references missing work file: {0}".format(review.context.work_item))
     return errors
+
+
+def validate_coordination_topology(repo_root: Path, config: ProjectConfig) -> List[str]:
+    coordination = inspect_coordination_worktree(repo_root, config)
+    if coordination.state not in {"invalid", "wrong_branch"}:
+        return []
+
+    detail = ": {0}".format(coordination.detail) if coordination.detail else ""
+    return [
+        "Invalid coordination worktree at {0} for {1}{2}".format(
+            coordination.path,
+            coordination.branch,
+            detail,
+        )
+    ]

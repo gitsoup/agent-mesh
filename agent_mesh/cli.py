@@ -210,14 +210,26 @@ def handle_doctor(_: argparse.Namespace) -> int:
 def handle_status(_: argparse.Namespace) -> int:
     from agent_mesh.config import load_project_config
     from agent_mesh.state.storage import list_claims, list_reviews, list_work_items, resolve_repo_root
+    from agent_mesh.topology import inspect_coordination_worktree
 
     repo_root = resolve_repo_root(Path.cwd())
     config = load_project_config(repo_root)
     work_items = list_work_items(repo_root)
     claims = list_claims(repo_root)
     reviews = list_reviews(repo_root)
+    coordination = inspect_coordination_worktree(repo_root, config)
 
     emit("Project: {0} ({1})".format(config.project_name, config.project_key))
+    emit("Shared root: {0}".format(repo_root))
+    emit(
+        "Coordination: {0} @ {1} [{2}]".format(
+            coordination.branch,
+            coordination.path,
+            coordination.state,
+        )
+    )
+    if coordination.detail:
+        emit("Coordination detail: {0}".format(coordination.detail))
     emit("Tasks: {0}".format(len(work_items)))
     for line in summarize_work_items(work_items):
         emit(line)

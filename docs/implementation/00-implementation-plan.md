@@ -155,3 +155,14 @@ mesh dashboard build
 ```
 
 All commands should complete successfully.
+
+## Coordination topology follow-up
+
+Agent Mesh now models an explicit coordination branch and expected coordination
+worktree path. The current status/doctor flows should be able to:
+
+- show the shared root and expected `mesh/state` worktree path
+- detect whether the coordination worktree is missing, dirty, or on the wrong
+  branch
+- preserve task worktree isolation while live-state routing work lands in later
+  phases

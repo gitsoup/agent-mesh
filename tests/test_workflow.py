@@ -41,6 +41,9 @@ def test_init_creates_agentic_scaffold(tmp_path: Path, monkeypatch, capsys) -> N
     repo_root = init_repo(tmp_path, monkeypatch, capsys)
 
     assert (repo_root / ".agentic/project.json").exists()
+    project = json.loads((repo_root / ".agentic/project.json").read_text(encoding="utf-8"))
+    assert project["coordination"]["branch"] == "mesh/state"
+    assert project["coordination"]["coordination_worktree"] is None
     assert (repo_root / ".agentic/context/CONTEXT.md").exists()
     assert (repo_root / ".agentic/workflows/claim.md").exists()
     assert (repo_root / ".agentic/skills/claim/SKILL.md").exists()
@@ -133,6 +136,9 @@ def test_doctor_status_and_task_lifecycle(tmp_path: Path, monkeypatch, capsys) -
 
     exit_code, output = run_cli(["status"], capsys)
     assert exit_code == 0
+    assert "Shared root:" in output
+    assert "Coordination: mesh/state @" in output
+    assert "[missing]" in output
     assert "Tasks: 1" in output
     assert "in_progress: 1" in output
     assert "Claims: 1" in output

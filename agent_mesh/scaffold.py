@@ -66,8 +66,10 @@ WORKFLOW_STEPS: Dict[str, List[str]] = {
         "Plan the smallest vertical slice.",
         "Add or update tests.",
         "Implement and run verification.",
-        "Record evidence.",
-        "Stop before opening a PR.",
+        "Inspect `git diff` and `git status` in the claimed workspace.",
+        "Remove accidental files, debug leftovers, and unrelated edits.",
+        "Record evidence, including commands and outcomes.",
+        "Stop only when the branch is in a deliberate reviewable state.",
     ],
     "diagnose": [
         "Reproduce the problem.",
@@ -82,7 +84,10 @@ WORKFLOW_STEPS: Dict[str, List[str]] = {
     ],
     "pr": [
         "Validate the branch and claim status.",
-        "Check verification status.",
+        "Confirm the current checkout matches the claimed workspace.",
+        "Check `git status` and `git diff` for unintended changes.",
+        "Refuse PR creation until the workspace is deliberate and reviewable.",
+        "Check verification status and summarize evidence.",
         "Generate the PR body.",
         "Create a review packet.",
         "Open the PR only when not in dry-run mode.",
@@ -147,11 +152,14 @@ def init_repo(
         adapters=selected_adapters,
         coordination={
             "strategy": "git_files",
+            "branch": "mesh/state",
             "work_dir": ".agentic/work",
             "claims_dir": ".agentic/claims",
             "reviews_dir": ".agentic/reviews",
+            "handoffs_dir": ".agentic/handoffs",
             "worktree_policy": worktree_policy,
             "worktree_root": worktree_root,
+            "coordination_worktree": None,
             "claim_stale_after_minutes": claim_stale_after_minutes,
         },
         dashboard={"enabled": dashboard, "output_dir": ".agentic/dashboard"},
@@ -426,11 +434,16 @@ This repository uses Agent Mesh for local-first coordination.
 5. Keep coordination state human-readable and reviewable.
 6. Claims should use a dedicated worktree and branch unless the project explicitly disables worktree isolation.
 7. Worktrees should be named by reusable workspace or lane identity, not by task ID.
-8. Stale claims should be resumed or explicitly taken over; safe takeover should keep the branch but allocate a new workspace by default.
-9. Do not implement claimed work from the shared root checkout when worktree isolation is enabled.
-10. Do not overwrite existing work without explicit confirmation.
-11. Prefer local-first flows; cloud runners are optional and future-facing.
-""".format(project_name=project_name)
+8. The shared root should stay on `{default_branch}`; live coordination state belongs on the `{coordination_branch}` branch in a dedicated coordination worktree.
+9. Stale claims should be resumed or explicitly taken over; safe takeover should keep the branch but allocate a new workspace by default.
+10. Do not implement claimed work from the shared root checkout when worktree isolation is enabled.
+11. Do not overwrite existing work without explicit confirmation.
+12. Prefer local-first flows; cloud runners are optional and future-facing.
+""".format(
+        project_name=project_name,
+        default_branch="main",
+        coordination_branch="mesh/state",
+    )
 
 
 def render_config_toml(config: ProjectConfig) -> str:
@@ -440,8 +453,10 @@ project_key = "{2}"
 default_branch = "{3}"
 provider = "{4}"
 dashboard_enabled = {5}
-worktree_policy = "{6}"
-claim_stale_after_minutes = {7}
+coordination_branch = "{6}"
+coordination_worktree = {7}
+worktree_policy = "{8}"
+claim_stale_after_minutes = {9}
 """.format(
         config.schema_version,
         config.project_name,
@@ -449,6 +464,12 @@ claim_stale_after_minutes = {7}
         config.default_branch,
         config.planning.provider,
         "true" if config.dashboard.enabled else "false",
+        config.coordination.branch,
+        (
+            '"{0}"'.format(config.coordination.coordination_worktree)
+            if config.coordination.coordination_worktree
+            else "null"
+        ),
         config.coordination.worktree_policy,
         config.coordination.claim_stale_after_minutes,
     )

@@ -132,7 +132,10 @@ Responsibilities:
 - Read task, claim, PRD, context, and relevant ADRs.
 - Use tests and feedback loops.
 - Prefer vertical slices.
+- Inspect `git diff` and `git status` before handing off.
+- Remove obvious accidental files, debug leftovers, and unrelated edits from the claimed workspace.
 - Update evidence as tests are run.
+- Leave the branch in a deliberate reviewable state before stopping.
 - Do not open PR; that belongs to `/pr`.
 
 ## 8. /diagnose
@@ -169,6 +172,9 @@ Create or prepare a pull request for the current claimed task.
 Responsibilities:
 
 - Validate claim and branch.
+- Confirm the current checkout matches the claimed workspace.
+- Check `git status` and `git diff` for unintended or accidental changes.
+- Refuse PR creation until the workspace is deliberate and reviewable.
 - Confirm tests/evidence.
 - Generate PR title and body.
 - Include task link, acceptance criteria, implementation summary, evidence, risks, and review checklist.

@@ -1,0 +1,35 @@
+{
+  "schema_version": "0.1",
+  "type": "review_request",
+  "id": "PR-MESH-18",
+  "work_id": "MESH-18",
+  "pr": {
+    "number": 7,
+    "url": "https://github.com/gitsoup/agent-mesh/pull/7",
+    "branch": "feat/MESH-18-add-workspace-guard-to-mesh-pr-to-prevent-running-from-wrong-worktree",
+    "base": "main"
+  },
+  "author": {
+    "agent_runtime": "agent",
+    "role": "implementer"
+  },
+  "requested_role": "reviewer",
+  "context": {
+    "work_item": ".agentic/work/MESH-18.json",
+    "claim": ".agentic/claims/MESH-18.json",
+    "prd": null,
+    "context_files": [
+      ".agentic/context/CONTEXT.md",
+      ".agentic/context/CONTEXT-MAP.md"
+    ]
+  },
+  "evidence": [
+    {"kind": "test", "command": "uv run pytest tests/test_workflow.py -q", "result": "33 passed", "summary": "All 33 tests pass from shared root; 3 new workspace-guard tests included", "created_at": "2026-05-19T22:42:00Z"},
+    {"kind": "test", "command": "test_pr_workspace_guard_blocks_run_from_wrong_directory", "result": "pass", "summary": "mesh pr exits 1 with ERROR and REQUIRED: cd when called from shared root instead of worktree", "created_at": "2026-05-19T22:42:00Z"},
+    {"kind": "test", "command": "test_pr_workspace_guard_passes_from_correct_worktree", "result": "pass", "summary": "mesh pr exits 0 and writes review packet when called from the correct worktree", "created_at": "2026-05-19T22:42:00Z"},
+    {"kind": "test", "command": "test_pr_workspace_guard_skipped_when_no_worktree_recorded", "result": "pass", "summary": "mesh pr exits 0 when worktree_policy=off (no worktree recorded on claim)", "created_at": "2026-05-19T22:42:00Z"},
+    {"kind": "review", "command": "git diff main..HEAD -- agent_mesh/cli.py", "result": "10-line guard added to handle_pr; Next: -> REQUIRED: in handle_claim", "summary": "Guard mirrors the existing pattern in handle_review (cli.py:527-531); no other changes", "created_at": "2026-05-19T22:42:00Z"}
+  ],
+  "status": "pending_review",
+  "created_at": "2026-05-19T22:42:20Z"
+}

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterable, List
@@ -351,6 +352,11 @@ def install_adapters(repo_root: Path, adapters: Iterable[str], force: bool = Fal
                 created,
                 skipped,
             )
+            record_result(
+                install_opencode_config(repo_root, force),
+                created,
+                skipped,
+            )
         elif adapter_name == "windsurf":
             record_result(
                 write_text(
@@ -362,6 +368,30 @@ def install_adapters(repo_root: Path, adapters: Iterable[str], force: bool = Fal
                 skipped,
             )
     return InitResult(created=created, skipped=skipped)
+
+
+def install_opencode_config(repo_root: Path, force: bool = False) -> tuple[Path, bool]:
+    opencode_config = repo_root / "opencode.json"
+    ensure_directory(opencode_config.parent)
+    if opencode_config.exists() and not force:
+        existing = json.loads(opencode_config.read_text(encoding="utf-8"))
+        skills = existing.get("skills", {})
+        paths = skills.get("paths", [])
+        if ".agents/skills" in paths:
+            return opencode_config, False
+        paths.append(".agents/skills")
+        skills["paths"] = paths
+        existing["skills"] = skills
+        atomic_write_json(opencode_config, existing)
+        return opencode_config, True
+    config = {
+        "$schema": "https://opencode.ai/config.json",
+        "skills": {
+            "paths": [".agents/skills"],
+        },
+    }
+    atomic_write_json(opencode_config, config)
+    return opencode_config, True
 
 
 def install_skill_wrapper(base_dir: Path, force: bool) -> InitResult:

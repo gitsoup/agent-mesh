@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import socket
 import subprocess
 from datetime import datetime, timedelta, timezone
@@ -299,7 +300,15 @@ def skill_install_status(repo_root: Path, adapter: str, skill_name: str) -> str:
     if adapter == "cursor":
         return "installed" if (repo_root / ".cursor/rules/agent-mesh.mdc").exists() else "missing"
     if adapter == "opencode":
-        return "installed" if (repo_root / "OPENCODE.md").exists() else "missing"
+        opencode_config = repo_root / "opencode.json"
+        if not opencode_config.exists():
+            return "missing"
+        try:
+            config = json.loads(opencode_config.read_text(encoding="utf-8"))
+            paths = config.get("skills", {}).get("paths", [])
+            return "installed" if ".agents/skills" in paths else "missing"
+        except Exception:
+            return "missing"
     if adapter == "windsurf":
         return "installed" if (repo_root / ".windsurfrules").exists() else "missing"
     return "unknown"

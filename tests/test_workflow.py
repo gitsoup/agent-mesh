@@ -961,3 +961,125 @@ def test_dashboard_escapes_html_in_task_fields(tmp_path: Path, monkeypatch, caps
     assert "&amp;" in html
     assert "&quot;quoted&quot;" in html
     assert "&lt;mod&gt;" in html
+
+
+def test_init_with_opencode_adapter_creates_opencode_json(tmp_path: Path, monkeypatch, capsys) -> None:
+    repo_root = tmp_path / "demo-repo"
+    (repo_root / ".git").mkdir(parents=True)
+    monkeypatch.chdir(repo_root)
+    exit_code, output = run_cli(
+        [
+            "init",
+            "--project-name",
+            "demo",
+            "--project-key",
+            "APP",
+            "--provider",
+            "local",
+            "--adapters",
+            "generic,opencode",
+            "--worktree-policy",
+            "off",
+            "--yes",
+        ],
+        capsys,
+    )
+    assert exit_code == 0
+    assert (repo_root / "opencode.json").exists()
+    config = json.loads((repo_root / "opencode.json").read_text(encoding="utf-8"))
+    assert config["$schema"] == "https://opencode.ai/config.json"
+    assert ".agents/skills" in config["skills"]["paths"]
+    assert (repo_root / "OPENCODE.md").exists()
+
+
+def test_adapter_install_opencode_is_idempotent(tmp_path: Path, monkeypatch, capsys) -> None:
+    repo_root = tmp_path / "demo-repo"
+    (repo_root / ".git").mkdir(parents=True)
+    monkeypatch.chdir(repo_root)
+    run_cli(
+        [
+            "init",
+            "--project-name",
+            "demo",
+            "--project-key",
+            "APP",
+            "--provider",
+            "local",
+            "--adapters",
+            "generic,opencode",
+            "--worktree-policy",
+            "off",
+            "--yes",
+        ],
+        capsys,
+    )
+
+    config_before = json.loads((repo_root / "opencode.json").read_text(encoding="utf-8"))
+
+    exit_code, output = run_cli(
+        ["adapter", "install", "opencode"],
+        capsys,
+    )
+    assert exit_code == 0
+
+    config_after = json.loads((repo_root / "opencode.json").read_text(encoding="utf-8"))
+    assert config_before == config_after
+
+
+def test_opencode_skill_list_shows_installed(tmp_path: Path, monkeypatch, capsys) -> None:
+    repo_root = tmp_path / "demo-repo"
+    (repo_root / ".git").mkdir(parents=True)
+    monkeypatch.chdir(repo_root)
+    run_cli(
+        [
+            "init",
+            "--project-name",
+            "demo",
+            "--project-key",
+            "APP",
+            "--provider",
+            "local",
+            "--adapters",
+            "generic,opencode",
+            "--worktree-policy",
+            "off",
+            "--yes",
+        ],
+        capsys,
+    )
+
+    exit_code, output = run_cli(["skill", "list"], capsys)
+    assert exit_code == 0
+    lines = output.strip().split("\n")
+    claim_line = [l for l in lines if l.startswith("claim\t")]
+    assert len(claim_line) == 1
+    assert "installed" in claim_line[0]
+
+
+def test_doctor_validates_opencode_config(tmp_path: Path, monkeypatch, capsys) -> None:
+    repo_root = tmp_path / "demo-repo"
+    (repo_root / ".git").mkdir(parents=True)
+    monkeypatch.chdir(repo_root)
+    run_cli(
+        [
+            "init",
+            "--project-name",
+            "demo",
+            "--project-key",
+            "APP",
+            "--provider",
+            "local",
+            "--adapters",
+            "generic,opencode",
+            "--worktree-policy",
+            "off",
+            "--yes",
+        ],
+        capsys,
+    )
+
+    (repo_root / "opencode.json").unlink()
+
+    exit_code, output = run_cli(["doctor"], capsys)
+    assert exit_code != 0
+    assert "opencode.json" in output

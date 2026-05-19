@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from pydantic import ValidationError
@@ -103,6 +104,16 @@ def validate_adapter_artifacts(repo_root: Path, config: ProjectConfig) -> list[s
         elif adapter == "opencode":
             if not (repo_root / "OPENCODE.md").exists():
                 errors.append("Missing adapter artifact for opencode: OPENCODE.md")
+            if not (repo_root / "opencode.json").exists():
+                errors.append("Missing adapter artifact for opencode: opencode.json")
+            else:
+                try:
+                    config = json.loads((repo_root / "opencode.json").read_text(encoding="utf-8"))
+                    paths = config.get("skills", {}).get("paths", [])
+                    if ".agents/skills" not in paths:
+                        errors.append("opencode.json missing skills.paths entry for .agents/skills")
+                except Exception as exc:
+                    errors.append(f"Invalid opencode.json: {exc}")
         elif adapter == "windsurf":
             if not (repo_root / ".windsurfrules").exists():
                 errors.append("Missing adapter artifact for windsurf: .windsurfrules")

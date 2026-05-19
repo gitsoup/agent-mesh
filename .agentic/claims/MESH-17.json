@@ -1,0 +1,23 @@
+{
+  "schema_version": "0.1",
+  "work_id": "MESH-17",
+  "status": "in_progress",
+  "claimed_by": "agent:agent:C02F80M5ML85",
+  "agent_runtime": "agent",
+  "role": "implementer",
+  "machine": "C02F80M5ML85",
+  "workspace_id": "agent-c02f80m5ml85",
+  "worktree": "/Users/karthick/projects/agent-mesh-agent-c02f80m5ml85",
+  "branch": "feat/MESH-17-complete-opencode-adapter-skills-registration-via-opencode-json",
+  "claimed_at": "2026-05-19T22:07:52Z",
+  "last_seen": "2026-05-19T22:07:52Z",
+  "evidence": [],
+  "events": [
+    {
+      "action": "claimed",
+      "at": "2026-05-19T22:07:52Z",
+      "by": "agent:agent:C02F80M5ML85",
+      "note": null
+    }
+  ]
+}

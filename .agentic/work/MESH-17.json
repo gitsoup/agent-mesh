@@ -1,0 +1,29 @@
+{
+  "schema_version": "0.1",
+  "id": "MESH-17",
+  "title": "Complete opencode adapter — skills registration via opencode.json",
+  "description": "The opencode adapter currently only writes OPENCODE.md (a single pointer file). It does not register skills so they appear via / in opencode. mesh init should always scaffold opencode.json with skills.paths pointing to .agents/skills, and mesh adapter install opencode should do the same for existing repos. This ensures that when a user opens a mesh-init'd repo in opencode, all 17 agent-mesh skills are automatically available.",
+  "kind": "feature",
+  "status": "ready",
+  "execution": "afk_safe",
+  "module": "cli",
+  "planning": {
+    "provider": "local",
+    "url": null,
+    "external_id": null
+  },
+  "prd": null,
+  "acceptance_criteria": [
+    "mesh init always creates opencode.json with $schema and skills.paths: [\".agents/skills\"]",
+    "mesh adapter install opencode creates/updates opencode.json with skills path (idempotent, preserves existing config)",
+    "skill_install_status(\"opencode\", ...) checks opencode.json exists and contains the skills path",
+    "mesh doctor validates opencode.json exists when opencode is in the adapter list",
+    "mesh skill list shows installed for opencode when opencode.json is present",
+    "Existing OPENCODE.md is kept as a complementary artifact (not removed)",
+    "Tests cover: init creates opencode.json, adapter install is idempotent, doctor validates missing, skill list status"
+  ],
+  "dependencies": [],
+  "risk": "low",
+  "created_at": "2026-05-19T08:50:00Z",
+  "updated_at": "2026-05-19T08:50:00Z"
+}

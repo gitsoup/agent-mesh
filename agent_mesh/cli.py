@@ -1047,6 +1047,9 @@ def create_review_packet(config, work_item, claim):
 
 
 def render_dashboard_html(config, work_items: Iterable[object], claims: Iterable[object], reviews: Iterable[object]) -> str:
+    import html as _html
+    e = _html.escape
+
     work_items = list(work_items)
     claims = list(claims)
     reviews = list(reviews)
@@ -1072,7 +1075,7 @@ def render_dashboard_html(config, work_items: Iterable[object], claims: Iterable
     risk_colors = {"high": "#dc2626", "medium": "#d97706", "low": "#16a34a"}
 
     def badge(text, fg, bg):
-        return '<span style="display:inline-block;padding:1px 8px;border-radius:12px;font-size:0.75rem;font-weight:600;color:{0};background:{1}">{2}</span>'.format(fg, bg, text)
+        return '<span style="display:inline-block;padding:1px 8px;border-radius:12px;font-size:0.75rem;font-weight:600;color:{0};background:{1}">{2}</span>'.format(fg, bg, e(text))
 
     def status_badge(s):
         fg, bg = status_colors.get(s, ("#374151", "#f3f4f6"))
@@ -1084,13 +1087,13 @@ def render_dashboard_html(config, work_items: Iterable[object], claims: Iterable
 
     def risk_dot(r):
         color = risk_colors.get(r, "#9ca3af")
-        return '<span title="risk: {0}" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:{1};margin-right:4px"></span>'.format(r, color)
+        return '<span title="risk: {0}" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:{1};margin-right:4px"></span>'.format(e(r), color)
 
     summary_chips = "".join(
         '<span style="display:inline-flex;align-items:center;gap:6px;padding:4px 14px;border-radius:20px;background:{1};color:{0};font-weight:600;font-size:0.85rem">'
         '<span style="font-size:1.1rem">{3}</span>{2}: {4}</span>'.format(
             fg, bg,
-            status,
+            e(status),
             {"done": "✓", "ready": "○", "in_progress": "◉", "blocked": "✗", "review": "⟳"}.get(status, "·"),
             count,
             *((fg, bg) for fg, bg in [status_colors.get(status, ("#374151", "#f3f4f6"))]),
@@ -1112,15 +1115,15 @@ def render_dashboard_html(config, work_items: Iterable[object], claims: Iterable
         '</div>'
         '</td>'
         '</tr>'.format(
-            id=item.id,
-            status=item.status,
-            kind=getattr(item, "kind", ""),
+            id=e(item.id),
+            status=e(item.status),
+            kind=e(getattr(item, "kind", "")),
             status_b=status_badge(item.status),
             kind_b=kind_badge(getattr(item, "kind", "")),
             risk_d=risk_dot(getattr(item, "risk", "")),
-            risk=getattr(item, "risk", "—"),
-            title=item.title,
-            module=getattr(item, "module", "—"),
+            risk=e(getattr(item, "risk", "—")),
+            title=e(item.title),
+            module=e(getattr(item, "module", "—")),
         )
         for item in sorted(work_items, key=lambda x: (x.status != "in_progress", x.status != "review", x.status != "ready", x.id))
     )
@@ -1136,10 +1139,10 @@ def render_dashboard_html(config, work_items: Iterable[object], claims: Iterable
         '<span style="color:#6b7280;font-family:monospace;font-size:0.78rem">{branch}</span>'
         '</div>'
         '</div>'.format(
-            work_id=c.work_id,
+            work_id=e(c.work_id),
             status_b=status_badge("in_progress"),
-            agent=getattr(c, "agent_runtime", "agent"),
-            branch=getattr(c, "branch", ""),
+            agent=e(getattr(c, "agent_runtime", "agent")),
+            branch=e(getattr(c, "branch", "")),
         )
         for c in claims
     ) or '<p style="color:#9ca3af;font-size:0.9rem">No active claims</p>'
@@ -1150,7 +1153,7 @@ def render_dashboard_html(config, work_items: Iterable[object], claims: Iterable
         '<span style="font-family:monospace;font-weight:600">{id}</span>'
         '{status_b}'
         '</div>'.format(
-            id=r.id,
+            id=e(r.id),
             status_b=status_badge(r.status),
         )
         for r in reviews
@@ -1254,8 +1257,8 @@ def render_dashboard_html(config, work_items: Iterable[object], claims: Iterable
   </script>
 </body>
 </html>""".format(
-        project_name=config.project_name,
-        project_key=config.project_key,
+        project_name=e(config.project_name),
+        project_key=e(config.project_key),
         done=done,
         total=total,
         pct=progress_pct,

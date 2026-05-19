@@ -943,3 +943,21 @@ def test_merge_from_inside_task_worktree_completes_dashboard_rebuild(tmp_path: P
     assert "Removed worktree" in output
     assert "Built dashboard" in output
     assert (repo_root / ".agentic/claims/archive/APP-1.json").exists()
+
+
+def test_dashboard_escapes_html_in_task_fields(tmp_path: Path, monkeypatch, capsys) -> None:
+    repo_root = init_repo(tmp_path, monkeypatch, capsys)
+    run_cli(
+        ["task", "add", '<script>alert("xss")</script> & "quoted"', "--module", "<mod>"],
+        capsys,
+    )
+
+    exit_code, output = run_cli(["dashboard", "build"], capsys)
+    assert exit_code == 0
+
+    html = (repo_root / ".agentic/dashboard/index.html").read_text(encoding="utf-8")
+    assert '<script>alert(' not in html
+    assert "&lt;script&gt;" in html
+    assert "&amp;" in html
+    assert "&quot;quoted&quot;" in html
+    assert "&lt;mod&gt;" in html

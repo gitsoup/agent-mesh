@@ -261,7 +261,7 @@ def test_claim_creates_dedicated_worktree_when_required(tmp_path: Path, monkeypa
     )
     assert exit_code == 0
     assert "Worktree:" in output
-    assert "Next: cd" in output
+    assert "REQUIRED: cd" in output
 
     claim = json.loads((repo_root / ".agentic/claims/APP-1.json").read_text(encoding="utf-8"))
     assert claim["worktree"] is not None
@@ -1083,3 +1083,52 @@ def test_doctor_validates_opencode_config(tmp_path: Path, monkeypatch, capsys) -
     exit_code, output = run_cli(["doctor"], capsys)
     assert exit_code != 0
     assert "opencode.json" in output
+
+
+def _setup_repo_with_claim(tmp_path: Path, monkeypatch, capsys, *, worktree_policy: str = "required"):
+    repo_root = tmp_path / "demo-repo"
+    repo_root.mkdir(parents=True)
+    subprocess.run(["git", "init", "-b", "main"], cwd=repo_root, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.email", "mesh@example.com"], cwd=repo_root, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.name", "Agent Mesh Tests"], cwd=repo_root, check=True, capture_output=True)
+    (repo_root / "README.md").write_text("demo\n", encoding="utf-8")
+    subprocess.run(["git", "add", "README.md"], cwd=repo_root, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "initial"], cwd=repo_root, check=True, capture_output=True)
+    monkeypatch.chdir(repo_root)
+    run_cli(
+        ["init", "--project-name", "demo", "--project-key", "APP", "--provider", "local",
+         "--adapters", "generic", "--worktree-policy", worktree_policy, "--yes"],
+        capsys,
+    )
+    run_cli(["task", "add", "Implement auth endpoint", "--module", "api"], capsys)
+    run_cli(["claim", "APP-1", "--agent", "agent", "--role", "implementer"], capsys)
+    claim = json.loads((repo_root / ".agentic/claims/APP-1.json").read_text(encoding="utf-8"))
+    return repo_root, claim
+
+
+def test_pr_workspace_guard_blocks_run_from_wrong_directory(tmp_path: Path, monkeypatch, capsys) -> None:
+    repo_root, claim = _setup_repo_with_claim(tmp_path, monkeypatch, capsys)
+    # remain in shared root — wrong location for mesh pr
+    monkeypatch.chdir(repo_root)
+    exit_code, output = run_cli(["pr", "--dry-run", "--work-id", "APP-1"], capsys)
+    assert exit_code == 1
+    assert "ERROR: mesh pr must be run from the claimed worktree." in output
+    assert "REQUIRED:" in output
+    assert claim["worktree"] in output
+
+
+def test_pr_workspace_guard_passes_from_correct_worktree(tmp_path: Path, monkeypatch, capsys) -> None:
+    repo_root, claim = _setup_repo_with_claim(tmp_path, monkeypatch, capsys)
+    monkeypatch.chdir(Path(claim["worktree"]))
+    exit_code, output = run_cli(["pr", "--dry-run", "--work-id", "APP-1"], capsys)
+    assert exit_code == 0
+    assert "Dry-run: review packet written to" in output
+
+
+def test_pr_workspace_guard_skipped_when_no_worktree_recorded(tmp_path: Path, monkeypatch, capsys) -> None:
+    repo_root, claim = _setup_repo_with_claim(tmp_path, monkeypatch, capsys, worktree_policy="off")
+    # worktree_policy=off means no worktree is recorded; guard should be skipped
+    monkeypatch.chdir(repo_root)
+    exit_code, output = run_cli(["pr", "--dry-run", "--work-id", "APP-1"], capsys)
+    assert exit_code == 0
+    assert "Dry-run: review packet written to" in output

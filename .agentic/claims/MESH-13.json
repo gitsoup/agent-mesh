@@ -1,0 +1,23 @@
+{
+  "schema_version": "0.1",
+  "work_id": "MESH-13",
+  "status": "in_progress",
+  "claimed_by": "agent:claude:C02F80M5ML85",
+  "agent_runtime": "agent",
+  "role": "implementer",
+  "machine": "C02F80M5ML85",
+  "workspace_id": "agent-c02f80m5ml85",
+  "worktree": "/Users/karthick/projects/agent-mesh-agent-c02f80m5ml85",
+  "branch": "feat/MESH-13-auto-refresh-claim-last-seen-on-mesh-command-runs",
+  "claimed_at": "2026-05-20T20:00:00Z",
+  "last_seen": "2026-05-20T20:08:27Z",
+  "evidence": [],
+  "events": [
+    {
+      "action": "claimed",
+      "at": "2026-05-20T20:00:00Z",
+      "by": "agent:claude:C02F80M5ML85",
+      "note": null
+    }
+  ]
+}

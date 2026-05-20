@@ -4,7 +4,7 @@
   "title": "Auto-refresh claim last_seen on mesh command runs",
   "description": "A claim's last_seen timestamp is only set at claim creation time and never updated during active work. This causes sessions to appear stale in mesh status after 120 minutes even when actively working. Any mesh command run from inside an active claim's worktree should bump last_seen on that claim so the heartbeat happens naturally without a separate explicit command.",
   "kind": "bug",
-  "status": "ready",
+  "status": "pr_open",
   "execution": "afk_safe",
   "module": "cli",
   "planning": {
@@ -22,5 +22,5 @@
   "dependencies": [],
   "risk": "low",
   "created_at": "2026-05-18T21:55:00Z",
-  "updated_at": "2026-05-18T21:55:00Z"
+  "updated_at": "2026-05-20T20:08:27Z"
 }

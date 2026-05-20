@@ -184,6 +184,8 @@ def test_doctor_status_and_task_lifecycle(tmp_path: Path, monkeypatch, capsys) -
     assert "in_progress: 1" in output
     assert "Claims: 1" in output
     assert "APP-1: codex [active] on feat/APP-1-implement-auth-endpoint" in output
+    assert "Built dashboard" in output
+    assert (repo_root / ".agentic/dashboard/index.html").exists()
 
     exit_code, output = run_cli(["pr", "--dry-run", "--work-id", "APP-1"], capsys)
     assert exit_code == 0
@@ -205,6 +207,46 @@ def test_doctor_status_and_task_lifecycle(tmp_path: Path, monkeypatch, capsys) -
     dashboard = repo_root / ".agentic/dashboard/index.html"
     assert dashboard.exists()
     assert "Agent Mesh" in dashboard.read_text(encoding="utf-8")
+
+
+def test_status_skips_dashboard_when_disabled_in_config(tmp_path: Path, monkeypatch, capsys) -> None:
+    repo_root = tmp_path / "demo-repo"
+    (repo_root / ".git").mkdir(parents=True)
+    monkeypatch.chdir(repo_root)
+    exit_code, output = run_cli(
+        [
+            "init",
+            "--project-name",
+            "demo",
+            "--project-key",
+            "APP",
+            "--provider",
+            "local",
+            "--adapters",
+            "generic,codex,claude",
+            "--worktree-policy",
+            "off",
+            "--no-dashboard",
+            "--yes",
+        ],
+        capsys,
+    )
+    assert exit_code == 0
+    assert "Initialized Agent Mesh" in output
+
+    exit_code, output = run_cli(["status"], capsys)
+    assert exit_code == 0
+    assert "Built dashboard" not in output
+    assert not (repo_root / ".agentic/dashboard/index.html").exists()
+
+
+def test_status_skip_dashboard_rebuild_flag(tmp_path: Path, monkeypatch, capsys) -> None:
+    repo_root = init_repo(tmp_path, monkeypatch, capsys)
+
+    exit_code, output = run_cli(["status", "--skip-dashboard-rebuild"], capsys)
+    assert exit_code == 0
+    assert "Built dashboard" not in output
+    assert not (repo_root / ".agentic/dashboard/index.html").exists()
 
 
 def test_claim_creates_dedicated_worktree_when_required(tmp_path: Path, monkeypatch, capsys) -> None:

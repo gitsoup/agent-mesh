@@ -459,7 +459,7 @@ def handle_claim(args: argparse.Namespace) -> int:
         emit("Worktree: {0}".format(worktree))
         if workspace_id:
             emit("Workspace: {0}".format(workspace_id))
-        emit("Next: cd {0}".format(worktree))
+        emit("REQUIRED: cd {0}".format(worktree))
     return 0
 
 
@@ -472,6 +472,16 @@ def handle_pr(args: argparse.Namespace) -> int:
     config = load_project_config(repo_root)
     work_item = load_model(repo_root / ".agentic/work" / "{0}.json".format(args.work_id), WorkItem)
     claim = load_model(repo_root / ".agentic/claims" / "{0}.json".format(args.work_id), Claim)
+
+    if claim.worktree:
+        current_path = Path.cwd().resolve()
+        target_worktree = Path(claim.worktree).resolve()
+        if current_path != target_worktree:
+            emit("ERROR: mesh pr must be run from the claimed worktree.")
+            emit("Current: {0}".format(current_path))
+            emit("Expected: {0}".format(target_worktree))
+            emit("REQUIRED: cd {0}".format(target_worktree))
+            return 1
 
     body = render_pr_body(work_item, claim)
     emit(body)
@@ -535,7 +545,7 @@ def handle_review(args: argparse.Namespace) -> int:
 
     if target_worktree is not None and current_path != target_worktree:
         emit("Resolved workspace differs from the current path.")
-        emit("Next: cd {0}".format(target_worktree))
+        emit("REQUIRED: cd {0}".format(target_worktree))
         emit("Then: mesh review {0}".format(review_packet.id))
         return 0
 

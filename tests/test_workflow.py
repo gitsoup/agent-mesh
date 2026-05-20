@@ -209,7 +209,7 @@ def test_doctor_status_and_task_lifecycle(tmp_path: Path, monkeypatch, capsys) -
     assert "Agent Mesh" in dashboard.read_text(encoding="utf-8")
 
 
-def test_status_skips_dashboard_when_disabled(tmp_path: Path, monkeypatch, capsys) -> None:
+def test_status_skips_dashboard_when_disabled_in_config(tmp_path: Path, monkeypatch, capsys) -> None:
     repo_root = tmp_path / "demo-repo"
     (repo_root / ".git").mkdir(parents=True)
     monkeypatch.chdir(repo_root)
@@ -235,6 +235,15 @@ def test_status_skips_dashboard_when_disabled(tmp_path: Path, monkeypatch, capsy
     assert "Initialized Agent Mesh" in output
 
     exit_code, output = run_cli(["status"], capsys)
+    assert exit_code == 0
+    assert "Built dashboard" not in output
+    assert not (repo_root / ".agentic/dashboard/index.html").exists()
+
+
+def test_status_skip_dashboard_rebuild_flag(tmp_path: Path, monkeypatch, capsys) -> None:
+    repo_root = init_repo(tmp_path, monkeypatch, capsys)
+
+    exit_code, output = run_cli(["status", "--skip-dashboard-rebuild"], capsys)
     assert exit_code == 0
     assert "Built dashboard" not in output
     assert not (repo_root / ".agentic/dashboard/index.html").exists()

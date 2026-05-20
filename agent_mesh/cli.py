@@ -67,7 +67,7 @@ def build_parser() -> argparse.ArgumentParser:
     doctor_parser.set_defaults(func=handle_doctor)
 
     status_parser = subparsers.add_parser("status", help="Summarize local Agent Mesh state.")
-    status_parser.add_argument("--no-dashboard", action="store_true")
+    status_parser.add_argument("--skip-dashboard-rebuild", action="store_true")
     status_parser.set_defaults(func=handle_status)
 
     skill_parser = subparsers.add_parser("skill", help="Skill catalog commands.")
@@ -263,7 +263,7 @@ def handle_status(args: argparse.Namespace) -> int:
     emit("Reviews: {0}".format(len(reviews)))
     for line in summarize_reviews(reviews):
         emit(line)
-    if config.dashboard.enabled and not args.no_dashboard:
+    if config.dashboard.enabled and not args.skip_dashboard_rebuild:
         build_dashboard(repo_root)
     return 0
 

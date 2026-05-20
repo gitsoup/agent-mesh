@@ -67,6 +67,7 @@ def build_parser() -> argparse.ArgumentParser:
     doctor_parser.set_defaults(func=handle_doctor)
 
     status_parser = subparsers.add_parser("status", help="Summarize local Agent Mesh state.")
+    status_parser.add_argument("--no-dashboard", action="store_true")
     status_parser.set_defaults(func=handle_status)
 
     skill_parser = subparsers.add_parser("skill", help="Skill catalog commands.")
@@ -230,7 +231,7 @@ def handle_doctor(_: argparse.Namespace) -> int:
     return 0
 
 
-def handle_status(_: argparse.Namespace) -> int:
+def handle_status(args: argparse.Namespace) -> int:
     from agent_mesh.config import load_project_config
     from agent_mesh.state.storage import list_claims, list_reviews, list_work_items, resolve_repo_root
     from agent_mesh.topology import inspect_coordination_worktree
@@ -262,7 +263,7 @@ def handle_status(_: argparse.Namespace) -> int:
     emit("Reviews: {0}".format(len(reviews)))
     for line in summarize_reviews(reviews):
         emit(line)
-    if config.dashboard.enabled:
+    if config.dashboard.enabled and not args.no_dashboard:
         build_dashboard(repo_root)
     return 0
 

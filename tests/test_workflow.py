@@ -209,6 +209,37 @@ def test_doctor_status_and_task_lifecycle(tmp_path: Path, monkeypatch, capsys) -
     assert "Agent Mesh" in dashboard.read_text(encoding="utf-8")
 
 
+def test_status_skips_dashboard_when_disabled(tmp_path: Path, monkeypatch, capsys) -> None:
+    repo_root = tmp_path / "demo-repo"
+    (repo_root / ".git").mkdir(parents=True)
+    monkeypatch.chdir(repo_root)
+    exit_code, output = run_cli(
+        [
+            "init",
+            "--project-name",
+            "demo",
+            "--project-key",
+            "APP",
+            "--provider",
+            "local",
+            "--adapters",
+            "generic,codex,claude",
+            "--worktree-policy",
+            "off",
+            "--no-dashboard",
+            "--yes",
+        ],
+        capsys,
+    )
+    assert exit_code == 0
+    assert "Initialized Agent Mesh" in output
+
+    exit_code, output = run_cli(["status"], capsys)
+    assert exit_code == 0
+    assert "Built dashboard" not in output
+    assert not (repo_root / ".agentic/dashboard/index.html").exists()
+
+
 def test_claim_creates_dedicated_worktree_when_required(tmp_path: Path, monkeypatch, capsys) -> None:
     repo_root = tmp_path / "demo-repo"
     repo_root.mkdir(parents=True)

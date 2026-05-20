@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Any, Iterable, List, Type, TypeVar
@@ -71,6 +72,29 @@ def list_claims(repo_root: Path) -> List[Claim]:
 
 def list_reviews(repo_root: Path) -> List[ReviewPacket]:
     return [load_model(path, ReviewPacket) for path in iter_json_files(repo_root / ".agentic/reviews")]
+
+
+def refresh_claim_last_seen(repo_root: Path, cwd: Path) -> None:
+    """Bump last_seen on any in-progress claim whose worktree matches cwd."""
+    claims_dir = repo_root / ".agentic/claims"
+    if not claims_dir.exists():
+        return
+    cwd_resolved = cwd.resolve()
+    for path in iter_json_files(claims_dir):
+        try:
+            claim = load_model(path, Claim)
+        except Exception:
+            continue
+        if claim.status != "in_progress" or not claim.worktree:
+            continue
+        if Path(claim.worktree).resolve() != cwd_resolved:
+            continue
+        try:
+            now = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+            claim.last_seen = now
+            save_model_json(path, claim)
+        except Exception:
+            pass
 
 
 def next_work_item_id(repo_root: Path, project_key: str) -> str:

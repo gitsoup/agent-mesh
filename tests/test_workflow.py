@@ -1117,3 +1117,81 @@ def test_pr_workspace_guard_skipped_when_no_worktree_recorded(tmp_path: Path, mo
     exit_code, output = run_cli(["pr", "--dry-run", "--work-id", "APP-1"], capsys)
     assert exit_code == 0
     assert "Dry-run: review packet written to" in output
+
+
+# MESH-13: auto-refresh claim last_seen on mesh command runs
+
+def test_last_seen_refreshed_when_running_from_claimed_worktree(tmp_path: Path, monkeypatch, capsys) -> None:
+    repo_root, claim = _setup_repo_with_claim(tmp_path, monkeypatch, capsys)
+    worktree = Path(claim["worktree"])
+
+    # Backdate last_seen far enough to be stale
+    stale_ts = "2020-01-01T00:00:00Z"
+    claim_path = repo_root / ".agentic/claims/APP-1.json"
+    data = json.loads(claim_path.read_text(encoding="utf-8"))
+    data["last_seen"] = stale_ts
+    claim_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+    monkeypatch.chdir(worktree)
+    run_cli(["version"], capsys)
+
+    updated = json.loads(claim_path.read_text(encoding="utf-8"))
+    assert updated["last_seen"] != stale_ts, "last_seen should be refreshed after running from worktree"
+
+
+def test_mesh_status_shows_active_for_current_worktree_regardless_of_elapsed_time(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    repo_root, claim = _setup_repo_with_claim(tmp_path, monkeypatch, capsys)
+    worktree = Path(claim["worktree"])
+
+    # Backdate last_seen far past the stale threshold (default 120 min)
+    stale_ts = "2020-01-01T00:00:00Z"
+    claim_path = repo_root / ".agentic/claims/APP-1.json"
+    data = json.loads(claim_path.read_text(encoding="utf-8"))
+    data["last_seen"] = stale_ts
+    claim_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+    monkeypatch.chdir(worktree)
+    exit_code, output = run_cli(["status"], capsys)
+    assert exit_code == 0
+    assert "[active]" in output, "claim should show [active] when running from its worktree"
+    assert "[stale]" not in output
+
+
+def test_last_seen_not_refreshed_from_outside_worktree(tmp_path: Path, monkeypatch, capsys) -> None:
+    repo_root, claim = _setup_repo_with_claim(tmp_path, monkeypatch, capsys)
+
+    stale_ts = "2020-01-01T00:00:00Z"
+    claim_path = repo_root / ".agentic/claims/APP-1.json"
+    data = json.loads(claim_path.read_text(encoding="utf-8"))
+    data["last_seen"] = stale_ts
+    claim_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+    # Run from shared root, not the worktree
+    monkeypatch.chdir(repo_root)
+    run_cli(["version"], capsys)
+
+    updated = json.loads(claim_path.read_text(encoding="utf-8"))
+    assert updated["last_seen"] == stale_ts, "last_seen must not change when running from outside the worktree"
+
+
+def test_last_seen_refresh_silent_when_claim_unwritable(tmp_path: Path, monkeypatch, capsys) -> None:
+    import os
+    import stat
+
+    repo_root, claim = _setup_repo_with_claim(tmp_path, monkeypatch, capsys)
+    worktree = Path(claim["worktree"])
+    claim_path = repo_root / ".agentic/claims/APP-1.json"
+
+    # Make the claim file read-only
+    original_mode = claim_path.stat().st_mode
+    claim_path.chmod(stat.S_IRUSR | stat.S_IRGRP | stat.S_IROTH)
+    try:
+        monkeypatch.chdir(worktree)
+        # Must not raise or produce any error output
+        exit_code, output = run_cli(["version"], capsys)
+        assert exit_code == 0
+        assert "ERROR" not in output
+    finally:
+        claim_path.chmod(original_mode)

@@ -167,6 +167,11 @@ def app(argv: Optional[Sequence[str]] = None) -> int:
     if not hasattr(args, "func"):
         parser.print_help()
         return 0
+    try:
+        from agent_mesh.state.storage import refresh_claim_last_seen, resolve_repo_root
+        refresh_claim_last_seen(resolve_repo_root(Path.cwd()), Path.cwd())
+    except Exception:
+        pass
     return int(args.func(args) or 0)
 
 

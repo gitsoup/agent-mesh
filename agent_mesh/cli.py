@@ -545,7 +545,7 @@ def handle_review(args: argparse.Namespace) -> int:
 
     if target_worktree is not None and current_path != target_worktree:
         emit("Resolved workspace differs from the current path.")
-        emit("Next: cd {0}".format(target_worktree))
+        emit("REQUIRED: cd {0}".format(target_worktree))
         emit("Then: mesh review {0}".format(review_packet.id))
         return 0
 

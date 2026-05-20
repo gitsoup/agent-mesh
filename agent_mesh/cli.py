@@ -534,6 +534,7 @@ def handle_review(args: argparse.Namespace) -> int:
     emit("Branch: {0} -> {1}".format(review_packet.pr.branch, review_packet.pr.base))
     if review_packet.pr.url:
         emit("PR: {0}".format(review_packet.pr.url))
+    emit("Requested role: {0}".format(review_packet.requested_role))
     emit("Workspace: {0}".format(claim.workspace_id or "unspecified"))
     emit("Review status: {0}".format(review_packet.status))
 

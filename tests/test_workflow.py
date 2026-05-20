@@ -549,38 +549,90 @@ def test_claim_takeover_reassigns_stale_claim(tmp_path: Path, monkeypatch, capsy
     assert claim["workspace_id"].startswith("codex-new-box-")
 
 
-def test_review_shows_pr_url_and_acceptance_criteria_from_shared_root(tmp_path: Path, monkeypatch, capsys) -> None:
+def test_review_shows_acceptance_criteria_from_shared_root(tmp_path: Path, monkeypatch, capsys) -> None:
     repo_root, claim = _setup_repo_with_claim(tmp_path, monkeypatch, capsys)
     monkeypatch.chdir(Path(claim["worktree"]))
     assert run_cli(["pr", "--dry-run", "--work-id", "APP-1"], capsys)[0] == 0
 
-    # review works from shared root — no worktree required
     monkeypatch.chdir(repo_root)
     exit_code, output = run_cli(["review", "PR-APP-1"], capsys)
     assert exit_code == 0
     assert "Review packet: PR-APP-1" in output
     assert "Branch:" in output
+    assert "Requested role:" in output
     assert "Next: review the PR" in output
     assert "Resolved workspace differs" not in output
     assert "REQUIRED: cd" not in output
 
 
-def test_review_works_from_worktree_and_shared_root_identically(tmp_path: Path, monkeypatch, capsys) -> None:
+def test_review_shows_pr_url_when_present(tmp_path: Path, monkeypatch, capsys) -> None:
     repo_root, claim = _setup_repo_with_claim(tmp_path, monkeypatch, capsys)
     monkeypatch.chdir(Path(claim["worktree"]))
     assert run_cli(["pr", "--dry-run", "--work-id", "APP-1"], capsys)[0] == 0
 
-    # from worktree
+    # inject a PR URL into the review packet
+    packet_path = repo_root / ".agentic/reviews/PR-APP-1.json"
+    packet = json.loads(packet_path.read_text(encoding="utf-8"))
+    packet["pr"]["url"] = "https://github.com/example/repo/pull/42"
+    packet_path.write_text(json.dumps(packet, indent=2), encoding="utf-8")
+
+    monkeypatch.chdir(repo_root)
+    exit_code, output = run_cli(["review", "PR-APP-1"], capsys)
+    assert exit_code == 0
+    assert "PR: https://github.com/example/repo/pull/42" in output
+
+
+def test_review_renders_evidence_when_present_and_omits_when_absent(tmp_path: Path, monkeypatch, capsys) -> None:
+    repo_root, claim = _setup_repo_with_claim(tmp_path, monkeypatch, capsys)
+    monkeypatch.chdir(Path(claim["worktree"]))
+    assert run_cli(["pr", "--dry-run", "--work-id", "APP-1"], capsys)[0] == 0
+
+    packet_path = repo_root / ".agentic/reviews/PR-APP-1.json"
+
+    # without evidence — should not emit Evidence section
+    monkeypatch.chdir(repo_root)
+    _, output_no_evidence = run_cli(["review", "PR-APP-1"], capsys)
+    assert "Evidence:" not in output_no_evidence
+
+    # inject evidence
+    packet = json.loads(packet_path.read_text(encoding="utf-8"))
+    packet["evidence"] = [{"kind": "test", "command": "pytest -q", "summary": "44 passed", "result": "pass", "created_at": "2026-01-01T00:00:00Z"}]
+    packet_path.write_text(json.dumps(packet, indent=2), encoding="utf-8")
+
+    _, output_with_evidence = run_cli(["review", "PR-APP-1"], capsys)
+    assert "Evidence:" in output_with_evidence
+    assert "[test] pytest -q -> 44 passed" in output_with_evidence
+
+
+def test_review_output_is_identical_from_worktree_and_shared_root(tmp_path: Path, monkeypatch, capsys) -> None:
+    repo_root, claim = _setup_repo_with_claim(tmp_path, monkeypatch, capsys)
+    monkeypatch.chdir(Path(claim["worktree"]))
+    assert run_cli(["pr", "--dry-run", "--work-id", "APP-1"], capsys)[0] == 0
+
     _, output_from_worktree = run_cli(["review", "PR-APP-1"], capsys)
-    # from shared root
     monkeypatch.chdir(repo_root)
     _, output_from_root = run_cli(["review", "PR-APP-1"], capsys)
 
-    for output in (output_from_worktree, output_from_root):
-        assert "Review packet: PR-APP-1" in output
-        assert "Next: review the PR" in output
-        assert "Resolved workspace differs" not in output
-        assert "Current path matches" not in output
+    assert output_from_worktree == output_from_root
+
+
+def test_review_works_when_worktree_policy_off(tmp_path: Path, monkeypatch, capsys) -> None:
+    repo_root, claim = _setup_repo_with_claim(tmp_path, monkeypatch, capsys, worktree_policy="off")
+    assert not claim.get("worktree"), "precondition: worktree_policy=off must not record a worktree"
+    assert run_cli(["pr", "--dry-run", "--work-id", "APP-1"], capsys)[0] == 0
+
+    exit_code, output = run_cli(["review", "PR-APP-1"], capsys)
+    assert exit_code == 0
+    assert "Review packet: PR-APP-1" in output
+    assert "Next: review the PR" in output
+
+
+def test_review_errors_on_missing_packet(tmp_path: Path, monkeypatch, capsys) -> None:
+    repo_root, _ = _setup_repo_with_claim(tmp_path, monkeypatch, capsys)
+    monkeypatch.chdir(repo_root)
+    exit_code, output = run_cli(["review", "PR-APP-NONEXISTENT"], capsys)
+    assert exit_code == 1
+    assert "ERROR:" in output
 
 
 def test_doctor_reports_cross_file_errors(tmp_path: Path, monkeypatch, capsys) -> None:

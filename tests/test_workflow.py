@@ -549,105 +549,38 @@ def test_claim_takeover_reassigns_stale_claim(tmp_path: Path, monkeypatch, capsy
     assert claim["workspace_id"].startswith("codex-new-box-")
 
 
-def test_review_resolves_claimed_workspace_from_shared_root(tmp_path: Path, monkeypatch, capsys) -> None:
-    repo_root = tmp_path / "demo-repo"
-    repo_root.mkdir(parents=True)
-    subprocess.run(["git", "init", "-b", "main"], cwd=repo_root, check=True, capture_output=True)
-    subprocess.run(
-        ["git", "config", "user.email", "mesh@example.com"],
-        cwd=repo_root,
-        check=True,
-        capture_output=True,
-    )
-    subprocess.run(
-        ["git", "config", "user.name", "Agent Mesh Tests"],
-        cwd=repo_root,
-        check=True,
-        capture_output=True,
-    )
-    (repo_root / "README.md").write_text("demo\n", encoding="utf-8")
-    subprocess.run(["git", "add", "README.md"], cwd=repo_root, check=True, capture_output=True)
-    subprocess.run(["git", "commit", "-m", "initial"], cwd=repo_root, check=True, capture_output=True)
-    monkeypatch.chdir(repo_root)
-
-    exit_code, _ = run_cli(
-        [
-            "init",
-            "--project-name",
-            "demo",
-            "--project-key",
-            "APP",
-            "--provider",
-            "local",
-            "--adapters",
-            "generic,codex,claude",
-            "--worktree-policy",
-            "required",
-            "--yes",
-        ],
-        capsys,
-    )
-    assert exit_code == 0
-    assert run_cli(["task", "add", "Implement auth endpoint", "--module", "api"], capsys)[0] == 0
-    assert run_cli(["claim", "APP-1", "--agent", "codex", "--role", "implementer"], capsys)[0] == 0
+def test_review_shows_pr_url_and_acceptance_criteria_from_shared_root(tmp_path: Path, monkeypatch, capsys) -> None:
+    repo_root, claim = _setup_repo_with_claim(tmp_path, monkeypatch, capsys)
+    monkeypatch.chdir(Path(claim["worktree"]))
     assert run_cli(["pr", "--dry-run", "--work-id", "APP-1"], capsys)[0] == 0
 
+    # review works from shared root — no worktree required
+    monkeypatch.chdir(repo_root)
     exit_code, output = run_cli(["review", "PR-APP-1"], capsys)
     assert exit_code == 0
     assert "Review packet: PR-APP-1" in output
-    assert "Resolved workspace differs from the current path." in output
-    assert "Then: mesh review PR-APP-1" in output
+    assert "Branch:" in output
+    assert "Next: review the PR" in output
+    assert "Resolved workspace differs" not in output
+    assert "REQUIRED: cd" not in output
 
 
-def test_review_confirms_when_already_in_claimed_workspace(tmp_path: Path, monkeypatch, capsys) -> None:
-    repo_root = tmp_path / "demo-repo"
-    repo_root.mkdir(parents=True)
-    subprocess.run(["git", "init", "-b", "main"], cwd=repo_root, check=True, capture_output=True)
-    subprocess.run(
-        ["git", "config", "user.email", "mesh@example.com"],
-        cwd=repo_root,
-        check=True,
-        capture_output=True,
-    )
-    subprocess.run(
-        ["git", "config", "user.name", "Agent Mesh Tests"],
-        cwd=repo_root,
-        check=True,
-        capture_output=True,
-    )
-    (repo_root / "README.md").write_text("demo\n", encoding="utf-8")
-    subprocess.run(["git", "add", "README.md"], cwd=repo_root, check=True, capture_output=True)
-    subprocess.run(["git", "commit", "-m", "initial"], cwd=repo_root, check=True, capture_output=True)
-    monkeypatch.chdir(repo_root)
-
-    exit_code, _ = run_cli(
-        [
-            "init",
-            "--project-name",
-            "demo",
-            "--project-key",
-            "APP",
-            "--provider",
-            "local",
-            "--adapters",
-            "generic,codex,claude",
-            "--worktree-policy",
-            "required",
-            "--yes",
-        ],
-        capsys,
-    )
-    assert exit_code == 0
-    assert run_cli(["task", "add", "Implement auth endpoint", "--module", "api"], capsys)[0] == 0
-    assert run_cli(["claim", "APP-1", "--agent", "codex", "--role", "implementer"], capsys)[0] == 0
+def test_review_works_from_worktree_and_shared_root_identically(tmp_path: Path, monkeypatch, capsys) -> None:
+    repo_root, claim = _setup_repo_with_claim(tmp_path, monkeypatch, capsys)
+    monkeypatch.chdir(Path(claim["worktree"]))
     assert run_cli(["pr", "--dry-run", "--work-id", "APP-1"], capsys)[0] == 0
 
-    claim = json.loads((repo_root / ".agentic/claims/APP-1.json").read_text(encoding="utf-8"))
-    monkeypatch.chdir(Path(claim["worktree"]))
+    # from worktree
+    _, output_from_worktree = run_cli(["review", "PR-APP-1"], capsys)
+    # from shared root
+    monkeypatch.chdir(repo_root)
+    _, output_from_root = run_cli(["review", "PR-APP-1"], capsys)
 
-    exit_code, output = run_cli(["review", "APP-1"], capsys)
-    assert exit_code == 0
-    assert "Current path matches the resolved review workspace." in output
+    for output in (output_from_worktree, output_from_root):
+        assert "Review packet: PR-APP-1" in output
+        assert "Next: review the PR" in output
+        assert "Resolved workspace differs" not in output
+        assert "Current path matches" not in output
 
 
 def test_doctor_reports_cross_file_errors(tmp_path: Path, monkeypatch, capsys) -> None:

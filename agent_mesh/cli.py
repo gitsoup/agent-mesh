@@ -262,6 +262,8 @@ def handle_status(_: argparse.Namespace) -> int:
     emit("Reviews: {0}".format(len(reviews)))
     for line in summarize_reviews(reviews):
         emit(line)
+    if config.dashboard.enabled:
+        build_dashboard(repo_root)
     return 0
 
 

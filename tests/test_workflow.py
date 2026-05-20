@@ -1139,7 +1139,7 @@ def test_last_seen_refreshed_when_running_from_claimed_worktree(tmp_path: Path, 
     assert updated["last_seen"] != stale_ts, "last_seen should be refreshed after running from worktree"
 
 
-def test_mesh_status_shows_active_for_current_worktree_regardless_of_elapsed_time(
+def test_mesh_status_shows_active_after_last_seen_refresh_from_worktree(
     tmp_path: Path, monkeypatch, capsys
 ) -> None:
     repo_root, claim = _setup_repo_with_claim(tmp_path, monkeypatch, capsys)
@@ -1174,6 +1174,23 @@ def test_last_seen_not_refreshed_from_outside_worktree(tmp_path: Path, monkeypat
 
     updated = json.loads(claim_path.read_text(encoding="utf-8"))
     assert updated["last_seen"] == stale_ts, "last_seen must not change when running from outside the worktree"
+
+
+def test_no_heartbeat_flag_skips_last_seen_refresh(tmp_path: Path, monkeypatch, capsys) -> None:
+    repo_root, claim = _setup_repo_with_claim(tmp_path, monkeypatch, capsys)
+    worktree = Path(claim["worktree"])
+
+    stale_ts = "2020-01-01T00:00:00Z"
+    claim_path = repo_root / ".agentic/claims/APP-1.json"
+    data = json.loads(claim_path.read_text(encoding="utf-8"))
+    data["last_seen"] = stale_ts
+    claim_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+    monkeypatch.chdir(worktree)
+    run_cli(["--no-heartbeat", "version"], capsys)
+
+    updated = json.loads(claim_path.read_text(encoding="utf-8"))
+    assert updated["last_seen"] == stale_ts, "--no-heartbeat must suppress the last_seen refresh"
 
 
 def test_last_seen_refresh_silent_when_claim_unwritable(tmp_path: Path, monkeypatch, capsys) -> None:

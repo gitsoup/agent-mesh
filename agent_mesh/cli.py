@@ -40,6 +40,12 @@ def build_parser() -> argparse.ArgumentParser:
         prog="mesh",
         description="Git-native coordination toolkit for parallel AI coding agents.",
     )
+    parser.add_argument(
+        "--no-heartbeat",
+        action="store_true",
+        default=False,
+        help="Skip last_seen refresh for this invocation (useful for scripting/monitoring).",
+    )
     subparsers = parser.add_subparsers(dest="command")
 
     version_parser = subparsers.add_parser("version", help="Print the installed Agent Mesh version.")
@@ -167,11 +173,12 @@ def app(argv: Optional[Sequence[str]] = None) -> int:
     if not hasattr(args, "func"):
         parser.print_help()
         return 0
-    try:
-        from agent_mesh.state.storage import refresh_claim_last_seen, resolve_repo_root
-        refresh_claim_last_seen(resolve_repo_root(Path.cwd()), Path.cwd())
-    except Exception:
-        pass
+    if not getattr(args, "no_heartbeat", False):
+        try:
+            from agent_mesh.state.storage import refresh_claim_last_seen, resolve_repo_root
+            refresh_claim_last_seen(resolve_repo_root(Path.cwd()), Path.cwd())
+        except Exception:
+            pass
     return int(args.func(args) or 0)
 
 

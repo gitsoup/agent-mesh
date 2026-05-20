@@ -1,11 +1,18 @@
 {
+  "schema_version": "0.1",
   "id": "MESH-22",
   "title": "Remove mesh review worktree routing \u2014 review works from anywhere",
   "description": "Remove the worktree routing guard from mesh review. Reviewers do not need the implementer's worktree \u2014 they need the branch and the PR URL. mesh review should work from the shared root, any lane worktree, or any machine. Replace the current 'Resolved workspace differs from current path / Next: cd' output with the PR URL, branch, acceptance criteria, and evidence summary. The implementer workspace guard on mesh pr (MESH-18) is correct and stays; this change only affects mesh review.",
   "kind": "bug",
-  "status": "ready",
+  "status": "done",
   "execution": "afk_safe",
   "module": "cli",
+  "planning": {
+    "provider": "local",
+    "url": null,
+    "external_id": null
+  },
+  "prd": null,
   "acceptance_criteria": [
     "mesh review works from the shared root without prompting to cd anywhere",
     "mesh review output shows: PR URL, branch, base, acceptance criteria, evidence, review status",
@@ -16,13 +23,6 @@
   ],
   "dependencies": [],
   "risk": "low",
-  "schema_version": "0.1",
-  "planning": {
-    "provider": "local",
-    "url": null,
-    "external_id": null
-  },
-  "prd": null,
   "created_at": "2026-05-20T19:31:44Z",
-  "updated_at": "2026-05-20T19:31:44Z"
+  "updated_at": "2026-05-20T19:51:03Z"
 }

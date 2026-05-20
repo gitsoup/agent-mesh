@@ -1,0 +1,29 @@
+{
+  "schema_version": "0.1",
+  "type": "review_request",
+  "id": "PR-MESH-11",
+  "work_id": "MESH-11",
+  "pr": {
+    "number": null,
+    "url": null,
+    "branch": "feat/MESH-11-mesh-status-should-rebuild-the-dashboard",
+    "base": "main"
+  },
+  "author": {
+    "agent_runtime": "codex",
+    "role": "implementer"
+  },
+  "requested_role": "reviewer",
+  "context": {
+    "work_item": ".agentic/work/MESH-11.json",
+    "claim": ".agentic/claims/MESH-11.json",
+    "prd": null,
+    "context_files": [
+      ".agentic/context/CONTEXT.md",
+      ".agentic/context/CONTEXT-MAP.md"
+    ]
+  },
+  "evidence": [],
+  "status": "pending_review",
+  "created_at": "2026-05-20T19:49:24Z"
+}

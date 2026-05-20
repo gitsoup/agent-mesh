@@ -1,0 +1,23 @@
+{
+  "schema_version": "0.1",
+  "work_id": "MESH-11",
+  "status": "in_progress",
+  "claimed_by": "agent:codex:C02F80M5ML85",
+  "agent_runtime": "codex",
+  "role": "implementer",
+  "machine": "C02F80M5ML85",
+  "workspace_id": "codex-c02f80m5ml85",
+  "worktree": "/Users/karthick/projects/agent-mesh-codex-c02f80m5ml85",
+  "branch": "feat/MESH-11-mesh-status-should-rebuild-the-dashboard",
+  "claimed_at": "2026-05-20T19:37:00Z",
+  "last_seen": "2026-05-20T19:37:00Z",
+  "evidence": [],
+  "events": [
+    {
+      "action": "claimed",
+      "at": "2026-05-20T19:37:00Z",
+      "by": "agent:codex:C02F80M5ML85",
+      "note": null
+    }
+  ]
+}

@@ -4,8 +4,8 @@
   "id": "PR-MESH-11",
   "work_id": "MESH-11",
   "pr": {
-    "number": null,
-    "url": null,
+    "number": 9,
+    "url": "https://github.com/gitsoup/agent-mesh/pull/9",
     "branch": "feat/MESH-11-mesh-status-should-rebuild-the-dashboard",
     "base": "main"
   },
@@ -23,7 +23,43 @@
       ".agentic/context/CONTEXT-MAP.md"
     ]
   },
-  "evidence": [],
-  "status": "pending_review",
+  "evidence": [
+    {
+      "kind": "test",
+      "command": "uv run pytest tests/test_workflow.py -q -k doctor_status_and_task_lifecycle",
+      "result": "1 passed, 35 deselected",
+      "summary": "Focused regression coverage for mesh status lifecycle including dashboard rebuild output and artifact creation.",
+      "created_at": "2026-05-20T19:49:24Z"
+    },
+    {
+      "kind": "test",
+      "command": "uv run pytest tests/test_workflow.py -q -k \"doctor_status_and_task_lifecycle or status_skips_dashboard_when_disabled\"",
+      "result": "2 passed, 35 deselected",
+      "summary": "Addressed review feedback by covering both the default rebuild path and the dashboard-disabled path.",
+      "created_at": "2026-05-20T20:00:00Z"
+    },
+    {
+      "kind": "test",
+      "command": "uv run pytest tests/test_workflow.py -q -k \"doctor_status_and_task_lifecycle or status_skips_dashboard_when_disabled_in_config or status_skip_dashboard_rebuild_flag\"",
+      "result": "3 passed, 35 deselected",
+      "summary": "Covers the default rebuild path, the persistent dashboard-disabled path, and the one-shot status opt-out path after renaming the flag to --skip-dashboard-rebuild.",
+      "created_at": "2026-05-20T20:05:00Z"
+    },
+    {
+      "kind": "review_response",
+      "command": "",
+      "result": "addressed",
+      "summary": "Added mesh status --no-dashboard, added disabled-dashboard regression coverage, and replaced the PR description with rationale, validation, and behavior notes. Kept rebuild-on-status as the default because it is the task contract; the new flag is the escape hatch.",
+      "created_at": "2026-05-20T20:00:00Z"
+    },
+    {
+      "kind": "review_response",
+      "command": "",
+      "result": "addressed",
+      "summary": "Renamed the one-shot status flag to --skip-dashboard-rebuild to avoid conflict with mesh init --no-dashboard, added a direct test for the one-shot opt-out path, and marked the PR ready for review.",
+      "created_at": "2026-05-20T20:05:00Z"
+    }
+  ],
+  "status": "merged",
   "created_at": "2026-05-20T19:49:24Z"
 }

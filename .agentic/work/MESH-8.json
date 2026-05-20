@@ -4,7 +4,7 @@
   "title": "Split durable work definitions from live runtime task state",
   "description": "Define and implement the separation between stable work planning artifacts on main and live runtime task state on mesh/state.",
   "kind": "feature",
-  "status": "ready",
+  "status": "done",
   "execution": "afk_safe",
   "module": "state",
   "planning": {
@@ -23,5 +23,5 @@
   ],
   "risk": "high",
   "created_at": "2026-05-17T17:40:00Z",
-  "updated_at": "2026-05-17T17:40:00Z"
+  "updated_at": "2026-05-20T22:00:00Z"
 }

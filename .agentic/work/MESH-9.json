@@ -4,7 +4,7 @@
   "title": "Route claim, pr, review, and sync commands through the coordination worktree",
   "description": "Make live coordination commands resolve, read, and write authoritative state through the mesh/state coordination worktree rather than branch-local files. mesh sync should also reconcile coordination state against git — detecting task branches merged outside of mesh merge and marking the corresponding work items, claims, and review packets as done/archived/merged.",
   "kind": "feature",
-  "status": "ready",
+  "status": "in_progress",
   "execution": "afk_safe",
   "module": "cli",
   "planning": {

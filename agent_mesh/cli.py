@@ -528,29 +528,35 @@ def handle_review(args: argparse.Namespace) -> int:
     review_packet = load_model(review_path, ReviewPacket)
     claim = load_model(repo_root / review_packet.context.claim, Claim)
     work_item = load_model(repo_root / review_packet.context.work_item, WorkItem)
-    current_path = Path.cwd().resolve()
-    target_worktree = Path(claim.worktree).resolve() if claim.worktree else None
 
     emit("Review packet: {0}".format(review_packet.id))
     emit("Work item: {0} ({1})".format(work_item.id, work_item.title))
     emit("Branch: {0} -> {1}".format(review_packet.pr.branch, review_packet.pr.base))
+    if review_packet.pr.url:
+        emit("PR: {0}".format(review_packet.pr.url))
     emit("Requested role: {0}".format(review_packet.requested_role))
     emit("Workspace: {0}".format(claim.workspace_id or "unspecified"))
-    emit("Worktree: {0}".format(claim.worktree or "shared repo"))
-    emit("Current path: {0}".format(current_path))
     emit("Review status: {0}".format(review_packet.status))
 
-    for context_file in review_packet.context.context_files:
-        emit("Context: {0}".format(context_file))
+    if work_item.acceptance_criteria:
+        emit("")
+        emit("Acceptance criteria:")
+        for criterion in work_item.acceptance_criteria:
+            emit("  [ ] {0}".format(criterion))
 
-    if target_worktree is not None and current_path != target_worktree:
-        emit("Resolved workspace differs from the current path.")
-        emit("REQUIRED: cd {0}".format(target_worktree))
-        emit("Then: mesh review {0}".format(review_packet.id))
-        return 0
+    if review_packet.evidence:
+        emit("")
+        emit("Evidence:")
+        for e in review_packet.evidence:
+            emit("  [{0}] {1} -> {2}".format(e.kind, e.command, e.summary))
 
-    emit("Current path matches the resolved review workspace.")
-    emit("Next: inspect the diff and review against the task contract.")
+    if review_packet.context.context_files:
+        emit("")
+        for context_file in review_packet.context.context_files:
+            emit("Context: {0}".format(context_file))
+
+    emit("")
+    emit("Next: review the PR and verify each acceptance criterion above.")
     return 0
 
 

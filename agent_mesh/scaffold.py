@@ -150,9 +150,17 @@ def init_repo(
     worktree_policy: str = "required",
     worktree_root: str | None = None,
     claim_stale_after_minutes: int = 120,
+    coordination_root: Path | None = None,
 ) -> InitResult:
+    """Scaffold Agent Mesh state.
+
+    coordination_root: where .agentic/ files are written. Defaults to repo_root
+    for backward compat; pass the coordination worktree path to write state
+    there instead of the shared root.
+    """
     created: List[Path] = []
     skipped: List[Path] = []
+    agentic_root = coordination_root if coordination_root is not None else repo_root
     selected_adapters = normalize_adapters(adapters)
 
     config = ProjectConfig(
@@ -176,32 +184,32 @@ def init_repo(
     )
 
     required_directories = [
-        repo_root / ".agentic",
-        repo_root / ".agentic/context",
-        repo_root / ".agentic/context/adr",
-        repo_root / ".agentic/work",
-        repo_root / ".agentic/claims",
-        repo_root / ".agentic/claims/archive",
-        repo_root / ".agentic/reviews",
-        repo_root / ".agentic/handoffs",
-        repo_root / ".agentic/workflows",
-        repo_root / ".agentic/skills",
-        repo_root / ".agentic/adapters",
+        agentic_root / ".agentic",
+        agentic_root / ".agentic/context",
+        agentic_root / ".agentic/context/adr",
+        agentic_root / ".agentic/work",
+        agentic_root / ".agentic/claims",
+        agentic_root / ".agentic/claims/archive",
+        agentic_root / ".agentic/reviews",
+        agentic_root / ".agentic/handoffs",
+        agentic_root / ".agentic/workflows",
+        agentic_root / ".agentic/skills",
+        agentic_root / ".agentic/adapters",
         repo_root / ".github/workflows",
     ]
     if dashboard:
-        required_directories.append(repo_root / ".agentic/dashboard")
+        required_directories.append(agentic_root / ".agentic/dashboard")
 
     for directory in required_directories:
         ensure_directory(directory)
 
     record_result(
-        write_json(repo_root / ".agentic/project.json", config.model_dump(), force=force),
+        write_json(agentic_root / ".agentic/project.json", config.model_dump(), force=force),
         created,
         skipped,
     )
     record_result(
-        write_text(repo_root / ".agentic/config.toml", render_config_toml(config), force=force),
+        write_text(agentic_root / ".agentic/config.toml", render_config_toml(config), force=force),
         created,
         skipped,
     )
@@ -212,7 +220,7 @@ def init_repo(
     )
     record_result(
         write_text(
-            repo_root / ".agentic/context/CONTEXT.md",
+            agentic_root / ".agentic/context/CONTEXT.md",
             "# Context\n\nDocument stable domain language, key concepts, and durable decisions here.\n",
             force=force,
         ),
@@ -221,7 +229,7 @@ def init_repo(
     )
     record_result(
         write_text(
-            repo_root / ".agentic/context/CONTEXT-MAP.md",
+            agentic_root / ".agentic/context/CONTEXT-MAP.md",
             "# Context Map\n\nMap major modules, boundaries, and where durable context lives.\n",
             force=force,
         ),
@@ -230,7 +238,7 @@ def init_repo(
     )
     record_result(
         write_text(
-            repo_root / ".agentic/context/adr/README.md",
+            agentic_root / ".agentic/context/adr/README.md",
             "# ADRs\n\nStore architecture decision records here when decisions are durable and hard to reverse.\n",
             force=force,
         ),
@@ -241,7 +249,7 @@ def init_repo(
     for folder_name in ["work", "claims", "reviews", "handoffs", "adapters"]:
         record_result(
             write_text(
-                repo_root / ".agentic" / folder_name / "README.md",
+                agentic_root / ".agentic" / folder_name / "README.md",
                 "# README\n\nThis directory stores human-readable Agent Mesh coordination state.\n",
                 force=force,
             ),
@@ -250,7 +258,7 @@ def init_repo(
         )
     record_result(
         write_text(
-            repo_root / ".agentic/claims/archive/README.md",
+            agentic_root / ".agentic/claims/archive/README.md",
             "# Archived Claims\n\nThis directory stores completed or superseded claim records.\n",
             force=force,
         ),
@@ -261,7 +269,7 @@ def init_repo(
     for skill in SKILLS:
         record_result(
             write_text(
-                repo_root / ".agentic/workflows" / "{0}.md".format(skill.name),
+                agentic_root / ".agentic/workflows" / "{0}.md".format(skill.name),
                 render_workflow(skill),
                 force=force,
             ),
@@ -269,7 +277,7 @@ def init_repo(
             skipped,
         )
 
-        skill_dir = repo_root / ".agentic/skills" / skill.name
+        skill_dir = agentic_root / ".agentic/skills" / skill.name
         ensure_directory(skill_dir)
         record_result(
             write_text(skill_dir / "SKILL.md", render_skill(skill), force=force),

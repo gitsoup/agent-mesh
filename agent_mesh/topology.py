@@ -156,20 +156,71 @@ def create_coordination_worktree(repo_root: Path, config: ProjectConfig, path: P
     branch = config.coordination.branch
     if branch_exists(repo_root, branch):
         args = ["worktree", "add", str(path), branch]
+        result = subprocess.run(
+            ["git", *args],
+            cwd=repo_root,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
     else:
-        args = ["worktree", "add", "-b", branch, str(path), config.default_branch]
+        # Create orphan branch: no shared history with main
+        result = _create_orphan_coordination_worktree(repo_root, branch, path)
+
+    if result.returncode == 0:
+        return
+
+    detail = (result.stderr or result.stdout).strip()
+    raise RuntimeError("failed to create coordination worktree: {0}".format(detail))
+
+
+def _create_orphan_coordination_worktree(
+    repo_root: Path, branch: str, path: Path
+) -> subprocess.CompletedProcess:
+    """Create mesh/state as an orphan branch with no shared history with main."""
+    # Try git worktree add --orphan (git >= 2.36)
     result = subprocess.run(
-        ["git", *args],
+        ["git", "worktree", "add", "--orphan", "-b", branch, str(path)],
         cwd=repo_root,
         check=False,
         capture_output=True,
         text=True,
     )
     if result.returncode == 0:
-        return
+        # Create initial empty commit so the branch has a ref
+        subprocess.run(
+            ["git", "commit", "--allow-empty", "-m", "Initialize {0} coordination branch".format(branch)],
+            cwd=path,
+            check=False,
+            capture_output=True,
+        )
+        return result
 
-    detail = (result.stderr or result.stdout).strip()
-    raise RuntimeError("failed to create coordination worktree: {0}".format(detail))
+    # Fallback for git < 2.36: create orphan branch manually then add worktree
+    init = subprocess.run(
+        ["git", "checkout", "--orphan", branch],
+        cwd=repo_root,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if init.returncode != 0:
+        return init
+    subprocess.run(["git", "rm", "-rf", "--quiet", "."], cwd=repo_root, check=False, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "--allow-empty", "-m", "Initialize {0} coordination branch".format(branch)],
+        cwd=repo_root,
+        check=False,
+        capture_output=True,
+    )
+    subprocess.run(["git", "checkout", "-"], cwd=repo_root, check=False, capture_output=True)
+    return subprocess.run(
+        ["git", "worktree", "add", str(path), branch],
+        cwd=repo_root,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
 
 
 def checkout_coordination_branch(repo_root: Path, config: ProjectConfig, path: Path) -> None:

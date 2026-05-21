@@ -35,6 +35,19 @@ def resolve_repo_root(start: Path) -> Path:
     raise FileNotFoundError("Could not find a git repository root from the given path.")
 
 
+def resolve_coordination_root(repo_root: Path) -> Path:
+    """Return the path whose .agentic/ subtree holds live coordination state.
+
+    Uses the ADR 0002 sibling naming convention: <repo>-mesh-state next to the
+    shared root. Falls back to repo_root when the coordination worktree has not
+    been set up yet (degraded / bootstrap mode).
+    """
+    candidate = repo_root.parent / "{0}-mesh-state".format(repo_root.name)
+    if candidate.exists() and (candidate / ".agentic").exists():
+        return candidate
+    return repo_root
+
+
 def load_json(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
 
@@ -76,7 +89,8 @@ def list_reviews(repo_root: Path) -> List[ReviewPacket]:
 
 def refresh_claim_last_seen(repo_root: Path, cwd: Path) -> None:
     """Bump last_seen on any in-progress claim whose worktree matches cwd."""
-    claims_dir = repo_root / ".agentic/claims"
+    coordination_root = resolve_coordination_root(repo_root)
+    claims_dir = coordination_root / ".agentic/claims"
     if not claims_dir.exists():
         return
     cwd_resolved = cwd.resolve()

@@ -58,8 +58,15 @@
       "result": "addressed",
       "summary": "Blocked active-lane claims through both --lane and --workspace-id, made lane workspace preparation reject active branches instead of switching away from them, and added regression coverage for active, dirty, exhausted-lane, and status-change retry paths.",
       "created_at": "2026-05-21T19:27:16Z"
+    },
+    {
+      "kind": "review_response",
+      "command": "",
+      "result": "approved",
+      "summary": "Re-review approved: active-lane guards are fixed, active-branch hijack is blocked, and the missing coverage for workspace_id, all-lanes-active, dirty lane, status-change retry, and non-lane regression paths is now in place.",
+      "created_at": "2026-05-21T19:34:39Z"
     }
   ],
-  "status": "pending_review",
+  "status": "approved",
   "created_at": "2026-05-21T19:27:35Z"
 }

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -156,20 +157,100 @@ def create_coordination_worktree(repo_root: Path, config: ProjectConfig, path: P
     branch = config.coordination.branch
     if branch_exists(repo_root, branch):
         args = ["worktree", "add", str(path), branch]
+        result = subprocess.run(
+            ["git", *args],
+            cwd=repo_root,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
     else:
-        args = ["worktree", "add", "-b", branch, str(path), config.default_branch]
+        # Create orphan branch: no shared history with main
+        result = _create_orphan_coordination_worktree(repo_root, branch, path)
+
+    if result.returncode == 0:
+        return
+
+    detail = (result.stderr or result.stdout).strip()
+    raise RuntimeError("failed to create coordination worktree: {0}".format(detail))
+
+
+_EMPTY_TREE_SHA = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+
+
+def _create_orphan_coordination_worktree(
+    repo_root: Path, branch: str, path: Path
+) -> subprocess.CompletedProcess:
+    """Create mesh/state as an orphan branch with no shared history with main."""
+    # Try git worktree add --orphan (git >= 2.36)
     result = subprocess.run(
-        ["git", *args],
+        ["git", "worktree", "add", "--orphan", "-b", branch, str(path)],
         cwd=repo_root,
         check=False,
         capture_output=True,
         text=True,
     )
     if result.returncode == 0:
-        return
+        # Create initial empty commit so the branch has a ref
+        subprocess.run(
+            ["git", "commit", "--allow-empty", "-m", "Initialize {0} coordination branch".format(branch)],
+            cwd=path,
+            check=False,
+            capture_output=True,
+        )
+        return result
 
-    detail = (result.stderr or result.stdout).strip()
-    raise RuntimeError("failed to create coordination worktree: {0}".format(detail))
+    # Fallback for git < 2.36: use low-level plumbing — never touches the working directory
+    return _create_orphan_via_commit_tree(repo_root, branch, path)
+
+
+def _create_orphan_via_commit_tree(
+    repo_root: Path, branch: str, path: Path
+) -> subprocess.CompletedProcess:
+    """Create orphan branch via commit-tree + update-ref; does not modify the working directory."""
+    env = os.environ.copy()
+    # Provide committer/author identity defaults when git user config is absent
+    for probe_key, env_key, default in [
+        ("user.name", "GIT_AUTHOR_NAME", "Agent Mesh"),
+        ("user.email", "GIT_AUTHOR_EMAIL", "mesh@local"),
+    ]:
+        probe = subprocess.run(
+            ["git", "config", probe_key], cwd=repo_root, capture_output=True, text=True
+        )
+        if probe.returncode != 0:
+            env[env_key] = default
+    env.setdefault("GIT_COMMITTER_NAME", env.get("GIT_AUTHOR_NAME", "Agent Mesh"))
+    env.setdefault("GIT_COMMITTER_EMAIL", env.get("GIT_AUTHOR_EMAIL", "mesh@local"))
+
+    commit = subprocess.run(
+        ["git", "commit-tree", _EMPTY_TREE_SHA, "-m", "Initialize {0} coordination branch".format(branch)],
+        cwd=repo_root,
+        check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    if commit.returncode != 0:
+        return commit
+
+    commit_hash = commit.stdout.strip()
+    ref = subprocess.run(
+        ["git", "update-ref", "refs/heads/{0}".format(branch), commit_hash],
+        cwd=repo_root,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if ref.returncode != 0:
+        return ref
+
+    return subprocess.run(
+        ["git", "worktree", "add", str(path), branch],
+        cwd=repo_root,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
 
 
 def checkout_coordination_branch(repo_root: Path, config: ProjectConfig, path: Path) -> None:

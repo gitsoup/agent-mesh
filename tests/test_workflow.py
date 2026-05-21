@@ -305,7 +305,8 @@ def test_claim_creates_dedicated_worktree_when_required(tmp_path: Path, monkeypa
     assert "Worktree:" in output
     assert "REQUIRED: cd" in output
 
-    claim = json.loads((repo_root / ".agentic/claims/APP-1.json").read_text(encoding="utf-8"))
+    coordination_root = repo_root.parent / "{0}-mesh-state".format(repo_root.name)
+    claim = json.loads((coordination_root / ".agentic/claims/APP-1.json").read_text(encoding="utf-8"))
     assert claim["worktree"] is not None
     assert claim["workspace_id"].startswith("codex-")
     assert Path(claim["worktree"]).exists()
@@ -437,12 +438,13 @@ def test_pr_dry_run_reports_review_packet_path_from_task_worktree(
     assert run_cli(["task", "add", "Implement auth endpoint", "--module", "api"], capsys)[0] == 0
     assert run_cli(["claim", "APP-1", "--agent", "codex", "--role", "implementer"], capsys)[0] == 0
 
-    claim = json.loads((repo_root / ".agentic/claims/APP-1.json").read_text(encoding="utf-8"))
+    coordination_root = repo_root.parent / "{0}-mesh-state".format(repo_root.name)
+    claim = json.loads((coordination_root / ".agentic/claims/APP-1.json").read_text(encoding="utf-8"))
     monkeypatch.chdir(Path(claim["worktree"]))
 
     exit_code, output = run_cli(["pr", "--dry-run", "--work-id", "APP-1"], capsys)
     assert exit_code == 0
-    expected_path = repo_root / ".agentic/reviews/PR-APP-1.json"
+    expected_path = coordination_root / ".agentic/reviews/PR-APP-1.json"
     assert "Dry-run: review packet written to {0}".format(expected_path) in output
     assert expected_path.exists()
 
@@ -488,13 +490,52 @@ def test_sync_recreates_missing_coordination_worktree(tmp_path: Path, monkeypatc
     assert exit_code == 0
 
     coordination_path = repo_root.parent / "{0}-mesh-state".format(repo_root.name)
-    subprocess.run(["git", "worktree", "remove", str(coordination_path)], cwd=repo_root, check=True, capture_output=True)
+    subprocess.run(["git", "worktree", "remove", "--force", str(coordination_path)], cwd=repo_root, check=True, capture_output=True)
     assert not coordination_path.exists()
 
     exit_code, output = run_cli(["sync"], capsys)
     assert exit_code == 0
     assert "Coordination worktree created: mesh/state @" in output
     assert coordination_path.exists()
+
+
+def test_coordination_worktree_uses_orphan_branch(tmp_path: Path, monkeypatch, capsys) -> None:
+    """mesh/state must be an orphan branch with no shared history with main."""
+    repo_root = tmp_path / "demo-repo"
+    repo_root.mkdir(parents=True)
+    subprocess.run(["git", "init", "-b", "main"], cwd=repo_root, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.email", "mesh@example.com"], cwd=repo_root, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.name", "Agent Mesh Tests"], cwd=repo_root, check=True, capture_output=True)
+    (repo_root / "README.md").write_text("demo\n", encoding="utf-8")
+    subprocess.run(["git", "add", "README.md"], cwd=repo_root, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "initial"], cwd=repo_root, check=True, capture_output=True)
+    monkeypatch.chdir(repo_root)
+
+    exit_code, _ = run_cli(
+        ["init", "--project-name", "demo", "--project-key", "APP", "--provider", "local",
+         "--adapters", "generic,codex,claude", "--worktree-policy", "required", "--yes"],
+        capsys,
+    )
+    assert exit_code == 0
+
+    # The root commit of mesh/state must have no parent (orphan chain)
+    root_result = subprocess.run(
+        ["git", "rev-list", "--max-parents=0", "mesh/state"],
+        cwd=repo_root, capture_output=True, text=True, check=True
+    )
+    root_commit = root_result.stdout.strip()
+    parent_result = subprocess.run(
+        ["git", "rev-parse", "{0}^".format(root_commit)],
+        cwd=repo_root, capture_output=True, text=True
+    )
+    assert parent_result.returncode != 0, "root commit of mesh/state must have no parent (orphan branch)"
+
+    # mesh/state and main must share no common ancestor
+    main_root = subprocess.run(
+        ["git", "rev-list", "--max-parents=0", "main"],
+        cwd=repo_root, capture_output=True, text=True, check=True
+    ).stdout.strip()
+    assert root_commit != main_root, "mesh/state and main must have different root commits (no shared history)"
 
 
 def test_claim_resume_updates_existing_claim(tmp_path: Path, monkeypatch, capsys) -> None:
@@ -592,7 +633,7 @@ def test_claim_takeover_reassigns_stale_claim(tmp_path: Path, monkeypatch, capsy
 
 
 def test_review_shows_acceptance_criteria_from_shared_root(tmp_path: Path, monkeypatch, capsys) -> None:
-    repo_root, claim = _setup_repo_with_claim(tmp_path, monkeypatch, capsys)
+    repo_root, _, claim = _setup_repo_with_claim(tmp_path, monkeypatch, capsys)
     monkeypatch.chdir(Path(claim["worktree"]))
     assert run_cli(["pr", "--dry-run", "--work-id", "APP-1"], capsys)[0] == 0
 
@@ -608,12 +649,12 @@ def test_review_shows_acceptance_criteria_from_shared_root(tmp_path: Path, monke
 
 
 def test_review_shows_pr_url_when_present(tmp_path: Path, monkeypatch, capsys) -> None:
-    repo_root, claim = _setup_repo_with_claim(tmp_path, monkeypatch, capsys)
+    repo_root, coordination_root, claim = _setup_repo_with_claim(tmp_path, monkeypatch, capsys)
     monkeypatch.chdir(Path(claim["worktree"]))
     assert run_cli(["pr", "--dry-run", "--work-id", "APP-1"], capsys)[0] == 0
 
     # inject a PR URL into the review packet
-    packet_path = repo_root / ".agentic/reviews/PR-APP-1.json"
+    packet_path = coordination_root / ".agentic/reviews/PR-APP-1.json"
     packet = json.loads(packet_path.read_text(encoding="utf-8"))
     packet["pr"]["url"] = "https://github.com/example/repo/pull/42"
     packet_path.write_text(json.dumps(packet, indent=2), encoding="utf-8")
@@ -625,11 +666,11 @@ def test_review_shows_pr_url_when_present(tmp_path: Path, monkeypatch, capsys) -
 
 
 def test_review_renders_evidence_when_present_and_omits_when_absent(tmp_path: Path, monkeypatch, capsys) -> None:
-    repo_root, claim = _setup_repo_with_claim(tmp_path, monkeypatch, capsys)
+    repo_root, coordination_root, claim = _setup_repo_with_claim(tmp_path, monkeypatch, capsys)
     monkeypatch.chdir(Path(claim["worktree"]))
     assert run_cli(["pr", "--dry-run", "--work-id", "APP-1"], capsys)[0] == 0
 
-    packet_path = repo_root / ".agentic/reviews/PR-APP-1.json"
+    packet_path = coordination_root / ".agentic/reviews/PR-APP-1.json"
 
     # without evidence — should not emit Evidence section
     monkeypatch.chdir(repo_root)
@@ -647,7 +688,7 @@ def test_review_renders_evidence_when_present_and_omits_when_absent(tmp_path: Pa
 
 
 def test_review_output_is_identical_from_worktree_and_shared_root(tmp_path: Path, monkeypatch, capsys) -> None:
-    repo_root, claim = _setup_repo_with_claim(tmp_path, monkeypatch, capsys)
+    repo_root, _, claim = _setup_repo_with_claim(tmp_path, monkeypatch, capsys)
     monkeypatch.chdir(Path(claim["worktree"]))
     assert run_cli(["pr", "--dry-run", "--work-id", "APP-1"], capsys)[0] == 0
 
@@ -659,7 +700,7 @@ def test_review_output_is_identical_from_worktree_and_shared_root(tmp_path: Path
 
 
 def test_review_works_when_worktree_policy_off(tmp_path: Path, monkeypatch, capsys) -> None:
-    repo_root, claim = _setup_repo_with_claim(tmp_path, monkeypatch, capsys, worktree_policy="off")
+    repo_root, _, claim = _setup_repo_with_claim(tmp_path, monkeypatch, capsys, worktree_policy="off")
     assert not claim.get("worktree"), "precondition: worktree_policy=off must not record a worktree"
     assert run_cli(["pr", "--dry-run", "--work-id", "APP-1"], capsys)[0] == 0
 
@@ -670,7 +711,7 @@ def test_review_works_when_worktree_policy_off(tmp_path: Path, monkeypatch, caps
 
 
 def test_review_errors_on_missing_packet(tmp_path: Path, monkeypatch, capsys) -> None:
-    repo_root, _ = _setup_repo_with_claim(tmp_path, monkeypatch, capsys)
+    repo_root, _, _ = _setup_repo_with_claim(tmp_path, monkeypatch, capsys)
     monkeypatch.chdir(repo_root)
     exit_code, output = run_cli(["review", "PR-APP-NONEXISTENT"], capsys)
     assert exit_code == 1
@@ -757,19 +798,24 @@ def test_merge_removes_task_worktree(tmp_path: Path, monkeypatch, capsys) -> Non
     )
     run_cli(["task", "add", "Implement auth endpoint", "--module", "api"], capsys)
     run_cli(["claim", "APP-1", "--agent", "codex", "--role", "implementer", "--no-push"], capsys)
-    run_cli(["pr", "--dry-run", "--work-id", "APP-1"], capsys)
 
-    claim = json.loads((repo_root / ".agentic/claims/APP-1.json").read_text(encoding="utf-8"))
+    coordination_root = repo_root.parent / "{0}-mesh-state".format(repo_root.name)
+    claim = json.loads((coordination_root / ".agentic/claims/APP-1.json").read_text(encoding="utf-8"))
     worktree_path = Path(claim["worktree"])
     assert worktree_path.exists()
+
+    # pr must run from the task worktree (workspace guard enforces this)
+    monkeypatch.chdir(worktree_path)
+    run_cli(["pr", "--dry-run", "--work-id", "APP-1"], capsys)
+    monkeypatch.chdir(repo_root)
 
     exit_code, output = run_cli(["merge", "APP-1", "--no-push", "--skip-merge-check"], capsys)
 
     assert exit_code == 0
     assert "Removed worktree:" in output
     assert not worktree_path.exists()
-    assert not (repo_root / ".agentic/claims/APP-1.json").exists()
-    assert (repo_root / ".agentic/claims/archive/APP-1.json").exists()
+    assert not (coordination_root / ".agentic/claims/APP-1.json").exists()
+    assert (coordination_root / ".agentic/claims/archive/APP-1.json").exists()
 
 
 def test_merge_skips_worktree_removal_when_already_absent(tmp_path: Path, monkeypatch, capsys) -> None:
@@ -792,7 +838,8 @@ def test_merge_skips_worktree_removal_when_already_absent(tmp_path: Path, monkey
     run_cli(["claim", "APP-1", "--agent", "codex", "--role", "implementer", "--no-push"], capsys)
 
     # Simulate worktree already removed (e.g. by a previous partial merge)
-    claim_data = json.loads((repo_root / ".agentic/claims/APP-1.json").read_text(encoding="utf-8"))
+    coordination_root = repo_root.parent / "{0}-mesh-state".format(repo_root.name)
+    claim_data = json.loads((coordination_root / ".agentic/claims/APP-1.json").read_text(encoding="utf-8"))
     worktree_path = Path(claim_data["worktree"])
     subprocess.run(["git", "worktree", "remove", "--force", str(worktree_path)], cwd=repo_root, check=True, capture_output=True)
     assert not worktree_path.exists()
@@ -884,9 +931,9 @@ def test_merge_blocks_on_coordination_worktree(tmp_path: Path, monkeypatch, caps
 
     # Manually point the claim worktree to the coordination worktree path
     coordination_path = repo_root.parent / "{0}-mesh-state".format(repo_root.name)
-    claim_data = json.loads((repo_root / ".agentic/claims/APP-1.json").read_text(encoding="utf-8"))
+    claim_data = json.loads((coordination_path / ".agentic/claims/APP-1.json").read_text(encoding="utf-8"))
     claim_data["worktree"] = str(coordination_path)
-    (repo_root / ".agentic/claims/APP-1.json").write_text(
+    (coordination_path / ".agentic/claims/APP-1.json").write_text(
         json.dumps(claim_data, indent=2) + "\n", encoding="utf-8"
     )
 
@@ -921,7 +968,8 @@ def test_merge_blocks_on_dirty_worktree_without_flag(tmp_path: Path, monkeypatch
     run_cli(["claim", "APP-1", "--agent", "codex", "--role", "implementer", "--no-push"], capsys)
     run_cli(["pr", "--dry-run", "--work-id", "APP-1"], capsys)
 
-    claim = json.loads((repo_root / ".agentic/claims/APP-1.json").read_text(encoding="utf-8"))
+    coordination_root = repo_root.parent / "{0}-mesh-state".format(repo_root.name)
+    claim = json.loads((coordination_root / ".agentic/claims/APP-1.json").read_text(encoding="utf-8"))
     # Write an uncommitted file into the task worktree
     (Path(claim["worktree"]) / "dirty.txt").write_text("unfinished\n", encoding="utf-8")
 
@@ -929,16 +977,21 @@ def test_merge_blocks_on_dirty_worktree_without_flag(tmp_path: Path, monkeypatch
 
     assert exit_code == 1
     assert "uncommitted changes" in output
-    assert (repo_root / ".agentic/claims/APP-1.json").exists()
+    assert (coordination_root / ".agentic/claims/APP-1.json").exists()
 
 
 def test_merge_discard_uncommitted_proceeds_and_rebuilds_dashboard(tmp_path: Path, monkeypatch, capsys) -> None:
     repo_root = _init_real_git_repo(tmp_path, monkeypatch, capsys)
     run_cli(["task", "add", "Implement auth endpoint", "--module", "api"], capsys)
     run_cli(["claim", "APP-1", "--agent", "codex", "--role", "implementer", "--no-push"], capsys)
-    run_cli(["pr", "--dry-run", "--work-id", "APP-1"], capsys)
 
-    claim = json.loads((repo_root / ".agentic/claims/APP-1.json").read_text(encoding="utf-8"))
+    coordination_root = repo_root.parent / "{0}-mesh-state".format(repo_root.name)
+    claim = json.loads((coordination_root / ".agentic/claims/APP-1.json").read_text(encoding="utf-8"))
+    # pr must run from the task worktree (workspace guard enforces this)
+    monkeypatch.chdir(Path(claim["worktree"]))
+    run_cli(["pr", "--dry-run", "--work-id", "APP-1"], capsys)
+    monkeypatch.chdir(repo_root)
+
     (Path(claim["worktree"]) / "dirty.txt").write_text("unfinished\n", encoding="utf-8")
 
     exit_code, output = run_cli(
@@ -958,9 +1011,12 @@ def test_merge_from_inside_task_worktree_completes_dashboard_rebuild(tmp_path: P
     repo_root = _init_real_git_repo(tmp_path, monkeypatch, capsys)
     run_cli(["task", "add", "Implement auth endpoint", "--module", "api"], capsys)
     run_cli(["claim", "APP-1", "--agent", "agent", "--role", "implementer", "--no-push"], capsys)
-    run_cli(["pr", "--dry-run", "--work-id", "APP-1"], capsys)
 
-    claim = json.loads((repo_root / ".agentic/claims/APP-1.json").read_text(encoding="utf-8"))
+    coordination_root = repo_root.parent / "{0}-mesh-state".format(repo_root.name)
+    claim = json.loads((coordination_root / ".agentic/claims/APP-1.json").read_text(encoding="utf-8"))
+    # pr must run from the task worktree (workspace guard enforces this)
+    monkeypatch.chdir(Path(claim["worktree"]))
+    run_cli(["pr", "--dry-run", "--work-id", "APP-1"], capsys)
     # Simulate the user running mesh merge from inside the task worktree
     monkeypatch.chdir(Path(claim["worktree"]))
 
@@ -969,7 +1025,7 @@ def test_merge_from_inside_task_worktree_completes_dashboard_rebuild(tmp_path: P
     assert exit_code == 0, output
     assert "Removed worktree" in output
     assert "Built dashboard" in output
-    assert (repo_root / ".agentic/claims/archive/APP-1.json").exists()
+    assert (coordination_root / ".agentic/claims/archive/APP-1.json").exists()
 
 
 def test_dashboard_escapes_html_in_task_fields(tmp_path: Path, monkeypatch, capsys) -> None:
@@ -1129,12 +1185,16 @@ def _setup_repo_with_claim(tmp_path: Path, monkeypatch, capsys, *, worktree_poli
     )
     run_cli(["task", "add", "Implement auth endpoint", "--module", "api"], capsys)
     run_cli(["claim", "APP-1", "--agent", "agent", "--role", "implementer", "--no-push"], capsys)
-    claim = json.loads((repo_root / ".agentic/claims/APP-1.json").read_text(encoding="utf-8"))
-    return repo_root, claim
+    if worktree_policy != "off":
+        coordination_root = repo_root.parent / "{0}-mesh-state".format(repo_root.name)
+    else:
+        coordination_root = repo_root
+    claim = json.loads((coordination_root / ".agentic/claims/APP-1.json").read_text(encoding="utf-8"))
+    return repo_root, coordination_root, claim
 
 
 def test_pr_workspace_guard_blocks_run_from_wrong_directory(tmp_path: Path, monkeypatch, capsys) -> None:
-    repo_root, claim = _setup_repo_with_claim(tmp_path, monkeypatch, capsys)
+    repo_root, _, claim = _setup_repo_with_claim(tmp_path, monkeypatch, capsys)
     # remain in shared root — wrong location for mesh pr
     monkeypatch.chdir(repo_root)
     exit_code, output = run_cli(["pr", "--dry-run", "--work-id", "APP-1"], capsys)
@@ -1145,7 +1205,7 @@ def test_pr_workspace_guard_blocks_run_from_wrong_directory(tmp_path: Path, monk
 
 
 def test_pr_workspace_guard_passes_from_correct_worktree(tmp_path: Path, monkeypatch, capsys) -> None:
-    repo_root, claim = _setup_repo_with_claim(tmp_path, monkeypatch, capsys)
+    repo_root, _, claim = _setup_repo_with_claim(tmp_path, monkeypatch, capsys)
     monkeypatch.chdir(Path(claim["worktree"]))
     exit_code, output = run_cli(["pr", "--dry-run", "--work-id", "APP-1"], capsys)
     assert exit_code == 0
@@ -1153,7 +1213,7 @@ def test_pr_workspace_guard_passes_from_correct_worktree(tmp_path: Path, monkeyp
 
 
 def test_pr_workspace_guard_skipped_when_no_worktree_recorded(tmp_path: Path, monkeypatch, capsys) -> None:
-    repo_root, claim = _setup_repo_with_claim(tmp_path, monkeypatch, capsys, worktree_policy="off")
+    repo_root, _, claim = _setup_repo_with_claim(tmp_path, monkeypatch, capsys, worktree_policy="off")
     assert not claim.get("worktree"), "precondition: worktree_policy=off must not record a worktree"
     monkeypatch.chdir(repo_root)
     exit_code, output = run_cli(["pr", "--dry-run", "--work-id", "APP-1"], capsys)
@@ -1164,12 +1224,12 @@ def test_pr_workspace_guard_skipped_when_no_worktree_recorded(tmp_path: Path, mo
 # MESH-13: auto-refresh claim last_seen on mesh command runs
 
 def test_last_seen_refreshed_when_running_from_claimed_worktree(tmp_path: Path, monkeypatch, capsys) -> None:
-    repo_root, claim = _setup_repo_with_claim(tmp_path, monkeypatch, capsys)
+    repo_root, coordination_root, claim = _setup_repo_with_claim(tmp_path, monkeypatch, capsys)
     worktree = Path(claim["worktree"])
 
     # Backdate last_seen far enough to be stale
     stale_ts = "2020-01-01T00:00:00Z"
-    claim_path = repo_root / ".agentic/claims/APP-1.json"
+    claim_path = coordination_root / ".agentic/claims/APP-1.json"
     data = json.loads(claim_path.read_text(encoding="utf-8"))
     data["last_seen"] = stale_ts
     claim_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
@@ -1184,12 +1244,12 @@ def test_last_seen_refreshed_when_running_from_claimed_worktree(tmp_path: Path, 
 def test_mesh_status_shows_active_after_last_seen_refresh_from_worktree(
     tmp_path: Path, monkeypatch, capsys
 ) -> None:
-    repo_root, claim = _setup_repo_with_claim(tmp_path, monkeypatch, capsys)
+    repo_root, coordination_root, claim = _setup_repo_with_claim(tmp_path, monkeypatch, capsys)
     worktree = Path(claim["worktree"])
 
     # Backdate last_seen far past the stale threshold (default 120 min)
     stale_ts = "2020-01-01T00:00:00Z"
-    claim_path = repo_root / ".agentic/claims/APP-1.json"
+    claim_path = coordination_root / ".agentic/claims/APP-1.json"
     data = json.loads(claim_path.read_text(encoding="utf-8"))
     data["last_seen"] = stale_ts
     claim_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
@@ -1202,10 +1262,10 @@ def test_mesh_status_shows_active_after_last_seen_refresh_from_worktree(
 
 
 def test_last_seen_not_refreshed_from_outside_worktree(tmp_path: Path, monkeypatch, capsys) -> None:
-    repo_root, claim = _setup_repo_with_claim(tmp_path, monkeypatch, capsys)
+    repo_root, coordination_root, claim = _setup_repo_with_claim(tmp_path, monkeypatch, capsys)
 
     stale_ts = "2020-01-01T00:00:00Z"
-    claim_path = repo_root / ".agentic/claims/APP-1.json"
+    claim_path = coordination_root / ".agentic/claims/APP-1.json"
     data = json.loads(claim_path.read_text(encoding="utf-8"))
     data["last_seen"] = stale_ts
     claim_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
@@ -1219,11 +1279,11 @@ def test_last_seen_not_refreshed_from_outside_worktree(tmp_path: Path, monkeypat
 
 
 def test_no_heartbeat_flag_skips_last_seen_refresh(tmp_path: Path, monkeypatch, capsys) -> None:
-    repo_root, claim = _setup_repo_with_claim(tmp_path, monkeypatch, capsys)
+    repo_root, coordination_root, claim = _setup_repo_with_claim(tmp_path, monkeypatch, capsys)
     worktree = Path(claim["worktree"])
 
     stale_ts = "2020-01-01T00:00:00Z"
-    claim_path = repo_root / ".agentic/claims/APP-1.json"
+    claim_path = coordination_root / ".agentic/claims/APP-1.json"
     data = json.loads(claim_path.read_text(encoding="utf-8"))
     data["last_seen"] = stale_ts
     claim_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
@@ -1239,9 +1299,9 @@ def test_last_seen_refresh_silent_when_claim_unwritable(tmp_path: Path, monkeypa
     import os
     import stat
 
-    repo_root, claim = _setup_repo_with_claim(tmp_path, monkeypatch, capsys)
+    repo_root, coordination_root, claim = _setup_repo_with_claim(tmp_path, monkeypatch, capsys)
     worktree = Path(claim["worktree"])
-    claim_path = repo_root / ".agentic/claims/APP-1.json"
+    claim_path = coordination_root / ".agentic/claims/APP-1.json"
 
     # Make the claim file read-only
     original_mode = claim_path.stat().st_mode

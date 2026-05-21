@@ -20,8 +20,11 @@ from agent_mesh.state.storage import (
 from agent_mesh.topology import inspect_coordination_worktree
 
 
-def validate_state_tree(repo_root: Path) -> list[str]:
+def validate_state_tree(repo_root: Path, coordination_root: Path | None = None) -> list[str]:
+    if coordination_root is None:
+        coordination_root = repo_root
     errors: list[str] = []
+    # project.json is always authoritative in repo_root (never in coordination_root)
     project_file = repo_root / PROJECT_FILE
     if not project_file.exists():
         errors.append(f"Missing {PROJECT_FILE}")
@@ -33,15 +36,15 @@ def validate_state_tree(repo_root: Path) -> list[str]:
     except ValidationError as exc:
         errors.append(f"Invalid .agentic/project.json: {exc}")
 
-    errors.extend(validate_directory(repo_root / ".agentic/work", WorkItem))
-    errors.extend(validate_directory(repo_root / ".agentic/claims", Claim))
-    errors.extend(validate_directory(repo_root / ".agentic/reviews", ReviewPacket))
-    errors.extend(validate_required_paths(repo_root))
+    errors.extend(validate_directory(coordination_root / ".agentic/work", WorkItem))
+    errors.extend(validate_directory(coordination_root / ".agentic/claims", Claim))
+    errors.extend(validate_directory(coordination_root / ".agentic/reviews", ReviewPacket))
+    errors.extend(validate_required_paths(repo_root, coordination_root))
     if config is not None:
         errors.extend(validate_adapter_artifacts(repo_root, config))
         errors.extend(validate_coordination_topology(repo_root, config))
     if not errors:
-        errors.extend(validate_relationships(repo_root))
+        errors.extend(validate_relationships(coordination_root))
     return errors
 
 
@@ -62,20 +65,32 @@ def validate_directory(path: Path, model_type: object) -> list[str]:
     return errors
 
 
-def validate_required_paths(repo_root: Path) -> list[str]:
-    required = [
+def validate_required_paths(repo_root: Path, coordination_root: Path) -> list[str]:
+    # Config/definition paths always live in repo_root
+    repo_required = [
         repo_root / ".agentic/context/CONTEXT.md",
         repo_root / ".agentic/context/CONTEXT-MAP.md",
-        repo_root / ".agentic/work",
-        repo_root / ".agentic/claims",
-        repo_root / ".agentic/reviews",
         repo_root / ".agentic/workflows",
         repo_root / ".agentic/skills",
     ]
+    # Live-state paths live in coordination_root (may equal repo_root when no worktree)
+    state_required = [
+        coordination_root / ".agentic/work",
+        coordination_root / ".agentic/claims",
+        coordination_root / ".agentic/reviews",
+    ]
     errors: list[str] = []
-    for path in required:
+    for path in repo_required:
         if not path.exists():
             errors.append(f"Missing required path: {path.relative_to(repo_root)}")
+    for path in state_required:
+        if not path.exists():
+            base = coordination_root if coordination_root != repo_root else repo_root
+            try:
+                label = path.relative_to(base)
+            except ValueError:
+                label = path
+            errors.append(f"Missing required path: {label}")
     return errors
 
 
@@ -139,11 +154,11 @@ def validate_skill_wrapper_tree(repo_root: Path, base_dir: Path, adapter: str) -
     return errors
 
 
-def validate_relationships(repo_root: Path) -> list[str]:
+def validate_relationships(coordination_root: Path) -> list[str]:
     errors: list[str] = []
-    work_items = {item.id: item for item in list_work_items(repo_root)}
-    claims = list_claims(repo_root)
-    reviews = list_reviews(repo_root)
+    work_items = {item.id: item for item in list_work_items(coordination_root)}
+    claims = list_claims(coordination_root)
+    reviews = list_reviews(coordination_root)
 
     for claim in claims:
         if claim.work_id not in work_items:
@@ -157,9 +172,9 @@ def validate_relationships(repo_root: Path) -> list[str]:
     for review in reviews:
         if review.work_id not in work_items:
             errors.append(f"Review references missing work item: {review.work_id}")
-        if review.status != "merged" and not (repo_root / review.context.claim).exists():
+        if review.status != "merged" and not (coordination_root / review.context.claim).exists():
             errors.append(f"Review references missing claim file: {review.context.claim}")
-        if not (repo_root / review.context.work_item).exists():
+        if not (coordination_root / review.context.work_item).exists():
             errors.append(f"Review references missing work file: {review.context.work_item}")
     return errors
 

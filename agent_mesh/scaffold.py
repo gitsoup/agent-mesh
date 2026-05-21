@@ -150,9 +150,20 @@ def init_repo(
     worktree_policy: str = "required",
     worktree_root: str | None = None,
     claim_stale_after_minutes: int = 120,
+    coordination_root: Path | None = None,
 ) -> InitResult:
+    """Scaffold Agent Mesh state.
+
+    coordination_root: where .agentic/ files are written. Defaults to repo_root
+    for backward compat; pass the coordination worktree path to write state
+    there instead of the shared root.
+    """
     created: List[Path] = []
     skipped: List[Path] = []
+    # state_root: where live coordination files (work, claims, reviews, handoffs) go.
+    # Config and definition files always stay in repo_root so load_project_config(repo_root)
+    # is always authoritative and there is exactly one project.json.
+    state_root = coordination_root if coordination_root is not None else repo_root
     selected_adapters = normalize_adapters(adapters)
 
     config = ProjectConfig(
@@ -175,28 +186,37 @@ def init_repo(
         dashboard={"enabled": dashboard, "output_dir": ".agentic/dashboard"},
     )
 
-    required_directories = [
+    # Config/definition directories always go to repo_root
+    config_directories = [
         repo_root / ".agentic",
         repo_root / ".agentic/context",
         repo_root / ".agentic/context/adr",
-        repo_root / ".agentic/work",
-        repo_root / ".agentic/claims",
-        repo_root / ".agentic/claims/archive",
-        repo_root / ".agentic/reviews",
-        repo_root / ".agentic/handoffs",
         repo_root / ".agentic/workflows",
         repo_root / ".agentic/skills",
         repo_root / ".agentic/adapters",
         repo_root / ".github/workflows",
     ]
+    # Live-state directories go to state_root (= coordination_root when set)
+    state_directories = [
+        state_root / ".agentic",
+        state_root / ".agentic/work",
+        state_root / ".agentic/claims",
+        state_root / ".agentic/claims/archive",
+        state_root / ".agentic/reviews",
+        state_root / ".agentic/handoffs",
+    ]
     if dashboard:
-        required_directories.append(repo_root / ".agentic/dashboard")
+        state_directories.append(state_root / ".agentic/dashboard")
 
-    for directory in required_directories:
-        ensure_directory(directory)
+    seen: set = set()
+    for directory in config_directories + state_directories:
+        if directory not in seen:
+            ensure_directory(directory)
+            seen.add(directory)
 
+    # project.json and config.toml always go to repo_root — one authoritative copy
     record_result(
-        write_json(repo_root / ".agentic/project.json", config.model_dump(), force=force),
+        write_json(repo_root / ".agentic/project.json", config.model_dump(), force=True),
         created,
         skipped,
     )
@@ -238,10 +258,11 @@ def init_repo(
         skipped,
     )
 
+    # State README files go to state_root (coordination worktree when set)
     for folder_name in ["work", "claims", "reviews", "handoffs", "adapters"]:
         record_result(
             write_text(
-                repo_root / ".agentic" / folder_name / "README.md",
+                state_root / ".agentic" / folder_name / "README.md",
                 "# README\n\nThis directory stores human-readable Agent Mesh coordination state.\n",
                 force=force,
             ),
@@ -250,7 +271,7 @@ def init_repo(
         )
     record_result(
         write_text(
-            repo_root / ".agentic/claims/archive/README.md",
+            state_root / ".agentic/claims/archive/README.md",
             "# Archived Claims\n\nThis directory stores completed or superseded claim records.\n",
             force=force,
         ),
@@ -258,6 +279,7 @@ def init_repo(
         skipped,
     )
 
+    # Workflow and skill definitions go to repo_root
     for skill in SKILLS:
         record_result(
             write_text(

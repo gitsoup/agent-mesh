@@ -199,6 +199,27 @@ def handle_init(args: argparse.Namespace) -> int:
     project_key = args.project_key or derive_project_key(project_name)
     adapters = parse_csv(args.adapters)
 
+    # Set up coordination worktree first so scaffold can write .agentic/ there
+    coordination_root = None
+    if args.worktree_policy != "off" and git_head_available(repo_root):
+        try:
+            # Bootstrap: write a minimal project.json to repo_root so
+            # load_project_config works, then move to coordination worktree.
+            _bootstrap_project_json(
+                repo_root, project_name, project_key, args.provider,
+                adapters, args.dashboard, args.worktree_policy, args.worktree_root,
+                args.claim_stale_after_minutes,
+            )
+            coordination = ensure_coordination_worktree(repo_root, load_project_config(repo_root))
+            emit(
+                "Coordination worktree {0}: {1} @ {2}".format(
+                    coordination.action, coordination.branch, coordination.path,
+                )
+            )
+            coordination_root = coordination.path
+        except RuntimeError as error:
+            emit("WARN: {0}".format(error))
+
     result = init_repo(
         repo_root=repo_root,
         project_name=project_name,
@@ -210,31 +231,93 @@ def handle_init(args: argparse.Namespace) -> int:
         worktree_policy=args.worktree_policy,
         worktree_root=args.worktree_root,
         claim_stale_after_minutes=args.claim_stale_after_minutes,
+        coordination_root=coordination_root,
     )
     emit("Initialized Agent Mesh in {0}".format(repo_root))
     emit("Created {0} files.".format(len(result.created)))
     emit("Skipped {0} existing files.".format(len(result.skipped)))
-    if args.worktree_policy != "off" and git_head_available(repo_root):
-        try:
-            coordination = ensure_coordination_worktree(repo_root, load_project_config(repo_root))
-            emit(
-                "Coordination worktree {0}: {1} @ {2}".format(
-                    coordination.action,
-                    coordination.branch,
-                    coordination.path,
-                )
-            )
-        except RuntimeError as error:
-            emit("WARN: {0}".format(error))
+    if coordination_root is not None and coordination_root != repo_root:
+        _commit_coordination_scaffold(coordination_root)
     return 0
 
 
+def _bootstrap_project_json(
+    repo_root: Path,
+    project_name: str,
+    project_key: str,
+    provider: str,
+    adapters: list,
+    dashboard: bool,
+    worktree_policy: str,
+    worktree_root: str | None,
+    claim_stale_after_minutes: int,
+) -> None:
+    """Write project.json to repo_root so topology helpers can load config before init_repo runs.
+
+    Uses the actual adapter list so the bootstrap and the final config are identical.
+    init_repo overwrites this file (force=True for project.json) with the full config.
+    """
+    from agent_mesh.state.storage import atomic_write_json
+    project_json = repo_root / ".agentic/project.json"
+    if project_json.exists():
+        return
+    project_json.parent.mkdir(parents=True, exist_ok=True)
+    atomic_write_json(project_json, {
+        "schema_version": "0.1",
+        "project_name": project_name,
+        "project_key": project_key,
+        "default_branch": "main",
+        "planning": {"provider": provider, "external_project": None},
+        "coordination": {
+            "strategy": "git_files",
+            "branch": "mesh/state",
+            "work_dir": ".agentic/work",
+            "claims_dir": ".agentic/claims",
+            "reviews_dir": ".agentic/reviews",
+            "handoffs_dir": ".agentic/handoffs",
+            "worktree_policy": worktree_policy,
+            "worktree_root": worktree_root,
+            "coordination_worktree": None,
+            "claim_stale_after_minutes": claim_stale_after_minutes,
+        },
+        "adapters": adapters,
+        "runner": {"default": "local_manual"},
+        "dashboard": {"enabled": dashboard, "output_dir": ".agentic/dashboard"},
+    })
+
+
+def _commit_coordination_scaffold(coordination_root: Path) -> None:
+    """Commit the initial .agentic/ state scaffold to the coordination branch.
+
+    Emits a warning if the commit fails — the scaffold is still usable in the
+    current session but will not survive worktree removal.
+    """
+    import subprocess as _sp
+    add = _sp.run(["git", "add", ".agentic/"], cwd=coordination_root, check=False, capture_output=True)
+    if add.returncode != 0:
+        emit("WARN: could not stage coordination scaffold for commit: {0}".format(
+            add.stderr.decode(errors="replace").strip() or add.stdout.decode(errors="replace").strip()
+        ))
+        return
+    commit = _sp.run(
+        ["git", "commit", "-m", "Initialize .agentic/ coordination scaffold"],
+        cwd=coordination_root,
+        check=False,
+        capture_output=True,
+    )
+    if commit.returncode != 0:
+        emit("WARN: could not commit coordination scaffold: {0}".format(
+            commit.stderr.decode(errors="replace").strip() or commit.stdout.decode(errors="replace").strip()
+        ))
+
+
 def handle_doctor(_: argparse.Namespace) -> int:
-    from agent_mesh.state.storage import resolve_repo_root
+    from agent_mesh.state.storage import resolve_coordination_root, resolve_repo_root
     from agent_mesh.state.validate import validate_state_tree
 
     repo_root = resolve_repo_root(Path.cwd())
-    errors = validate_state_tree(repo_root)
+    coordination_root = resolve_coordination_root(repo_root)
+    errors = validate_state_tree(repo_root, coordination_root)
     if errors:
         for error in errors:
             emit("ERROR: {0}".format(error))
@@ -245,14 +328,15 @@ def handle_doctor(_: argparse.Namespace) -> int:
 
 def handle_status(args: argparse.Namespace) -> int:
     from agent_mesh.config import load_project_config
-    from agent_mesh.state.storage import list_claims, list_reviews, list_work_items, resolve_repo_root
+    from agent_mesh.state.storage import list_claims, list_reviews, list_work_items, resolve_coordination_root, resolve_repo_root
     from agent_mesh.topology import inspect_coordination_worktree
 
     repo_root = resolve_repo_root(Path.cwd())
+    coordination_root = resolve_coordination_root(repo_root)
     config = load_project_config(repo_root)
-    work_items = list_work_items(repo_root)
-    claims = list_claims(repo_root)
-    reviews = list_reviews(repo_root)
+    work_items = list_work_items(coordination_root)
+    claims = list_claims(coordination_root)
+    reviews = list_reviews(coordination_root)
     coordination = inspect_coordination_worktree(repo_root, config)
 
     emit("Project: {0} ({1})".format(config.project_name, config.project_key))
@@ -276,7 +360,7 @@ def handle_status(args: argparse.Namespace) -> int:
     for line in summarize_reviews(reviews):
         emit(line)
     if config.dashboard.enabled and not args.skip_dashboard_rebuild:
-        build_dashboard(repo_root)
+        build_dashboard(repo_root, coordination_root)
     return 0
 
 
@@ -349,11 +433,12 @@ def handle_adapter_install(args: argparse.Namespace) -> int:
 def handle_task_add(args: argparse.Namespace) -> int:
     from agent_mesh.config import load_project_config
     from agent_mesh.state.models import ProviderRef, WorkItem
-    from agent_mesh.state.storage import next_work_item_id, resolve_repo_root, save_model_json
+    from agent_mesh.state.storage import next_work_item_id, resolve_coordination_root, resolve_repo_root, save_model_json
 
     repo_root = resolve_repo_root(Path.cwd())
+    coordination_root = resolve_coordination_root(repo_root)
     config = load_project_config(repo_root)
-    work_id = next_work_item_id(repo_root, config.project_key)
+    work_id = next_work_item_id(coordination_root, config.project_key)
     now = utc_now()
 
     description = args.description or args.title
@@ -374,27 +459,29 @@ def handle_task_add(args: argparse.Namespace) -> int:
         created_at=now,
         updated_at=now,
     )
-    path = repo_root / ".agentic/work" / "{0}.json".format(work_id)
+    path = coordination_root / ".agentic/work" / "{0}.json".format(work_id)
     save_model_json(path, work_item)
     emit("Created task {0}".format(work_id))
     return 0
 
 
 def handle_task_list(_: argparse.Namespace) -> int:
-    from agent_mesh.state.storage import list_work_items, resolve_repo_root
+    from agent_mesh.state.storage import list_work_items, resolve_coordination_root, resolve_repo_root
 
     repo_root = resolve_repo_root(Path.cwd())
-    for work_item in list_work_items(repo_root):
+    coordination_root = resolve_coordination_root(repo_root)
+    for work_item in list_work_items(coordination_root):
         emit("{0}\t{1}\t{2}".format(work_item.id, work_item.status, work_item.title))
     return 0
 
 
 def handle_task_show(args: argparse.Namespace) -> int:
     from agent_mesh.state.models import WorkItem
-    from agent_mesh.state.storage import load_model, resolve_repo_root
+    from agent_mesh.state.storage import load_model, resolve_coordination_root, resolve_repo_root
 
     repo_root = resolve_repo_root(Path.cwd())
-    work_item = load_model(repo_root / ".agentic/work" / "{0}.json".format(args.work_id), WorkItem)
+    coordination_root = resolve_coordination_root(repo_root)
+    work_item = load_model(coordination_root / ".agentic/work" / "{0}.json".format(args.work_id), WorkItem)
     emit(work_item.model_dump_json(indent=2))
     return 0
 
@@ -402,14 +489,15 @@ def handle_task_show(args: argparse.Namespace) -> int:
 def handle_claim(args: argparse.Namespace) -> int:
     from agent_mesh.config import load_project_config
     from agent_mesh.state.models import Claim, ClaimEvent, WorkItem
-    from agent_mesh.state.storage import load_model, resolve_repo_root, save_model_json
+    from agent_mesh.state.storage import load_model, resolve_coordination_root, resolve_repo_root, save_model_json
 
     repo_root = resolve_repo_root(Path.cwd())
+    coordination_root = resolve_coordination_root(repo_root)
     config = load_project_config(repo_root)
-    work_path = repo_root / ".agentic/work" / "{0}.json".format(args.work_id)
+    work_path = coordination_root / ".agentic/work" / "{0}.json".format(args.work_id)
     work_item = load_model(work_path, WorkItem)
 
-    existing_claim_path = repo_root / ".agentic/claims" / "{0}.json".format(args.work_id)
+    existing_claim_path = coordination_root / ".agentic/claims" / "{0}.json".format(args.work_id)
     if args.resume and args.takeover:
         emit("ERROR: choose only one of --resume or --takeover")
         return 1
@@ -417,6 +505,7 @@ def handle_claim(args: argparse.Namespace) -> int:
         claim = load_model(existing_claim_path, Claim)
         return handle_existing_claim(
             repo_root=repo_root,
+            coordination_root=coordination_root,
             config=config,
             work_item=work_item,
             claim=claim,
@@ -481,33 +570,38 @@ def handle_claim(args: argparse.Namespace) -> int:
 def handle_pr(args: argparse.Namespace) -> int:
     from agent_mesh.config import load_project_config
     from agent_mesh.state.models import Claim, WorkItem
-    from agent_mesh.state.storage import load_model, resolve_repo_root, save_model_json
+    from agent_mesh.state.storage import load_model, resolve_coordination_root, resolve_repo_root, save_model_json
 
     repo_root = resolve_repo_root(Path.cwd())
+    coordination_root = resolve_coordination_root(repo_root)
     config = load_project_config(repo_root)
-    work_item = load_model(repo_root / ".agentic/work" / "{0}.json".format(args.work_id), WorkItem)
-    claim = load_model(repo_root / ".agentic/claims" / "{0}.json".format(args.work_id), Claim)
+    work_item = load_model(coordination_root / ".agentic/work" / "{0}.json".format(args.work_id), WorkItem)
+    claim = load_model(coordination_root / ".agentic/claims" / "{0}.json".format(args.work_id), Claim)
 
     if claim.worktree:
-        current_path = Path.cwd().resolve()
-        target_worktree = Path(claim.worktree).resolve()
-        if current_path != target_worktree:
-            emit("ERROR: mesh pr must be run from the claimed worktree.")
-            emit("Current: {0}".format(current_path))
-            emit("Expected: {0}".format(target_worktree))
-            emit("REQUIRED: cd {0}".format(target_worktree))
-            return 1
+        worktree_path = Path(claim.worktree)
+        if not worktree_path.exists():
+            emit("WARNING: claimed worktree no longer exists at {0} — proceeding from current directory".format(claim.worktree))
+        else:
+            current_path = Path.cwd().resolve()
+            target_worktree = worktree_path.resolve()
+            if current_path != target_worktree:
+                emit("ERROR: mesh pr must be run from the claimed worktree.")
+                emit("Current: {0}".format(current_path))
+                emit("Expected: {0}".format(target_worktree))
+                emit("REQUIRED: cd {0}".format(target_worktree))
+                return 1
 
     body = render_pr_body(work_item, claim)
     emit(body)
 
     review_packet = create_review_packet(config, work_item, claim)
-    review_packet_path = repo_root / ".agentic/reviews" / "{0}.json".format(review_packet.id)
+    review_packet_path = coordination_root / ".agentic/reviews" / "{0}.json".format(review_packet.id)
     save_model_json(review_packet_path, review_packet)
 
     work_item.status = "pr_open"
     work_item.updated_at = utc_now()
-    save_model_json(repo_root / ".agentic/work" / "{0}.json".format(args.work_id), work_item)
+    save_model_json(coordination_root / ".agentic/work" / "{0}.json".format(args.work_id), work_item)
 
     if args.dry_run:
         emit("Dry-run: review packet written to {0}".format(review_packet_path))
@@ -517,14 +611,15 @@ def handle_pr(args: argparse.Namespace) -> int:
 def handle_review_packet(args: argparse.Namespace) -> int:
     from agent_mesh.config import load_project_config
     from agent_mesh.state.models import Claim, WorkItem
-    from agent_mesh.state.storage import load_model, resolve_repo_root, save_model_json
+    from agent_mesh.state.storage import load_model, resolve_coordination_root, resolve_repo_root, save_model_json
 
     repo_root = resolve_repo_root(Path.cwd())
+    coordination_root = resolve_coordination_root(repo_root)
     config = load_project_config(repo_root)
-    work_item = load_model(repo_root / ".agentic/work" / "{0}.json".format(args.work_id), WorkItem)
-    claim = load_model(repo_root / ".agentic/claims" / "{0}.json".format(args.work_id), Claim)
+    work_item = load_model(coordination_root / ".agentic/work" / "{0}.json".format(args.work_id), WorkItem)
+    claim = load_model(coordination_root / ".agentic/claims" / "{0}.json".format(args.work_id), Claim)
     review_packet = create_review_packet(config, work_item, claim)
-    review_packet_path = repo_root / ".agentic/reviews" / "{0}.json".format(review_packet.id)
+    review_packet_path = coordination_root / ".agentic/reviews" / "{0}.json".format(review_packet.id)
     save_model_json(review_packet_path, review_packet)
     emit("Wrote review packet {0}".format(review_packet_path))
     return 0
@@ -532,17 +627,18 @@ def handle_review_packet(args: argparse.Namespace) -> int:
 
 def handle_review(args: argparse.Namespace) -> int:
     from agent_mesh.state.models import Claim, ReviewPacket, WorkItem
-    from agent_mesh.state.storage import load_model, resolve_repo_root
+    from agent_mesh.state.storage import load_model, resolve_coordination_root, resolve_repo_root
 
     repo_root = resolve_repo_root(Path.cwd())
-    review_path = resolve_review_packet_path(repo_root, args.target)
+    coordination_root = resolve_coordination_root(repo_root)
+    review_path = resolve_review_packet_path(coordination_root, args.target)
     if review_path is None:
         emit("ERROR: could not find review packet for {0}".format(args.target))
         return 1
 
     review_packet = load_model(review_path, ReviewPacket)
-    claim = load_model(repo_root / review_packet.context.claim, Claim)
-    work_item = load_model(repo_root / review_packet.context.work_item, WorkItem)
+    claim = load_model(coordination_root / review_packet.context.claim, Claim)
+    work_item = load_model(coordination_root / review_packet.context.work_item, WorkItem)
 
     emit("Review packet: {0}".format(review_packet.id))
     emit("Work item: {0} ({1})".format(work_item.id, work_item.title))
@@ -575,24 +671,27 @@ def handle_review(args: argparse.Namespace) -> int:
     return 0
 
 
-def build_dashboard(repo_root: Path) -> None:
+def build_dashboard(repo_root: Path, coordination_root: Optional[Path] = None) -> None:
     from agent_mesh.config import load_project_config
-    from agent_mesh.state.storage import list_claims, list_reviews, list_work_items
+    from agent_mesh.state.storage import list_claims, list_reviews, list_work_items, resolve_coordination_root
 
+    if coordination_root is None:
+        coordination_root = resolve_coordination_root(repo_root)
     config = load_project_config(repo_root)
     output_path = repo_root / config.dashboard.output_dir / "index.html"
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    work_items = list_work_items(repo_root)
-    claims = list_claims(repo_root)
-    reviews = list_reviews(repo_root)
+    work_items = list_work_items(coordination_root)
+    claims = list_claims(coordination_root)
+    reviews = list_reviews(coordination_root)
     output_path.write_text(render_dashboard_html(config, work_items, claims, reviews), encoding="utf-8")
     emit("Built dashboard at {0}".format(output_path))
 
 
 def handle_dashboard_build(_: argparse.Namespace) -> int:
-    from agent_mesh.state.storage import resolve_repo_root
+    from agent_mesh.state.storage import resolve_coordination_root, resolve_repo_root
 
-    build_dashboard(resolve_repo_root(Path.cwd()))
+    repo_root = resolve_repo_root(Path.cwd())
+    build_dashboard(repo_root, resolve_coordination_root(repo_root))
     return 0
 
 
@@ -601,20 +700,21 @@ def handle_merge(args: argparse.Namespace) -> int:
 
     from agent_mesh.config import load_project_config
     from agent_mesh.state.models import Claim, WorkItem
-    from agent_mesh.state.storage import load_model, resolve_repo_root, save_model_json
+    from agent_mesh.state.storage import load_model, resolve_coordination_root, resolve_repo_root, save_model_json
     from agent_mesh.topology import resolve_coordination_worktree_path
 
     repo_root = resolve_repo_root(Path.cwd())
+    coordination_root = resolve_coordination_root(repo_root)
     config = load_project_config(repo_root)
     warnings_fired = False
 
-    work_path = repo_root / ".agentic/work" / "{0}.json".format(args.work_id)
+    work_path = coordination_root / ".agentic/work" / "{0}.json".format(args.work_id)
     if not work_path.exists():
         emit("ERROR: work item {0} not found".format(args.work_id))
         return 1
     work_item = load_model(work_path, WorkItem)
 
-    claim_path = repo_root / ".agentic/claims" / "{0}.json".format(args.work_id)
+    claim_path = coordination_root / ".agentic/claims" / "{0}.json".format(args.work_id)
     if not claim_path.exists():
         emit("ERROR: no active claim for {0}".format(args.work_id))
         return 1
@@ -687,7 +787,7 @@ def handle_merge(args: argparse.Namespace) -> int:
             warnings_fired = True
 
     # Update review packet status to merged if one exists
-    review_packet_path = repo_root / ".agentic/reviews" / "PR-{0}.json".format(args.work_id)
+    review_packet_path = coordination_root / ".agentic/reviews" / "PR-{0}.json".format(args.work_id)
     if review_packet_path.exists():
         from agent_mesh.state.models import ReviewPacket
         review = load_model(review_packet_path, ReviewPacket)
@@ -707,7 +807,7 @@ def handle_merge(args: argparse.Namespace) -> int:
     emit("Marked {0} done".format(args.work_id))
 
     # Archive the claim last
-    archive_dir = repo_root / ".agentic/claims/archive"
+    archive_dir = coordination_root / ".agentic/claims/archive"
     archive_dir.mkdir(parents=True, exist_ok=True)
     archive_path = archive_dir / "{0}.json".format(args.work_id)
     try:
@@ -718,7 +818,7 @@ def handle_merge(args: argparse.Namespace) -> int:
         warnings_fired = True
 
     if config.dashboard.enabled and not warnings_fired:
-        build_dashboard(repo_root)
+        build_dashboard(repo_root, coordination_root)
     elif config.dashboard.enabled:
         emit("Skipped dashboard rebuild due to warnings — run mesh sync to rebuild")
 
@@ -727,10 +827,11 @@ def handle_merge(args: argparse.Namespace) -> int:
 
 def handle_sync(_: argparse.Namespace) -> int:
     from agent_mesh.config import load_project_config
-    from agent_mesh.state.storage import resolve_repo_root
+    from agent_mesh.state.storage import resolve_coordination_root, resolve_repo_root
     from agent_mesh.topology import ensure_coordination_worktree
 
     repo_root = resolve_repo_root(Path.cwd())
+    coordination_root = resolve_coordination_root(repo_root)
     config = load_project_config(repo_root)
     if config.coordination.worktree_policy != "off" and git_head_available(repo_root):
         try:
@@ -742,11 +843,13 @@ def handle_sync(_: argparse.Namespace) -> int:
                     coordination.path,
                 )
             )
+            # Re-probe after ensure in case the worktree was just created
+            coordination_root = resolve_coordination_root(repo_root)
         except RuntimeError as error:
             emit("ERROR: {0}".format(error))
             return 1
     if config.dashboard.enabled:
-        build_dashboard(repo_root)
+        build_dashboard(repo_root, coordination_root)
     return handle_doctor(argparse.Namespace())
 
 
@@ -764,10 +867,10 @@ def git_head_available(repo_root: Path) -> bool:
     return result.returncode == 0
 
 
-def resolve_review_packet_path(repo_root: Path, target: str) -> Optional[Path]:
+def resolve_review_packet_path(coordination_root: Path, target: str) -> Optional[Path]:
     candidates = [
-        repo_root / ".agentic/reviews" / "{0}.json".format(target),
-        repo_root / ".agentic/reviews" / "PR-{0}.json".format(target),
+        coordination_root / ".agentic/reviews" / "{0}.json".format(target),
+        coordination_root / ".agentic/reviews" / "PR-{0}.json".format(target),
     ]
     for candidate in candidates:
         if candidate.exists():
@@ -792,7 +895,7 @@ def claim_activity(claim, stale_after_minutes: int, now: Optional[datetime] = No
     return "stale" if parse_utc(claim.last_seen) < stale_after else "active"
 
 
-def handle_existing_claim(repo_root, config, work_item, claim, claim_path, args) -> int:
+def handle_existing_claim(repo_root, coordination_root, config, work_item, claim, claim_path, args) -> int:
     from agent_mesh.state.models import ClaimEvent
     from agent_mesh.state.storage import save_model_json
 
@@ -815,7 +918,7 @@ def handle_existing_claim(repo_root, config, work_item, claim, claim_path, args)
         if work_item.status == "ready":
             work_item.status = "in_progress"
             work_item.updated_at = now
-            save_model_json(repo_root / ".agentic/work" / "{0}.json".format(work_item.id), work_item)
+            save_model_json(coordination_root / ".agentic/work" / "{0}.json".format(work_item.id), work_item)
         emit("Resumed {0} on branch {1}".format(work_item.id, claim.branch))
         if claim.worktree:
             emit("Worktree: {0}".format(claim.worktree))
@@ -870,7 +973,7 @@ def handle_existing_claim(repo_root, config, work_item, claim, claim_path, args)
         if work_item.status == "ready":
             work_item.status = "in_progress"
             work_item.updated_at = now
-            save_model_json(repo_root / ".agentic/work" / "{0}.json".format(work_item.id), work_item)
+            save_model_json(coordination_root / ".agentic/work" / "{0}.json".format(work_item.id), work_item)
         emit("Took over stale claim for {0} on branch {1}".format(work_item.id, claim.branch))
         if claim.worktree:
             emit("Worktree: {0}".format(claim.worktree))

@@ -17,6 +17,11 @@
       "kind": "test_run",
       "summary": "47 passed, 0 failed — uv run pytest tests/test_workflow.py",
       "recorded_at": "2026-05-21T00:00:00Z"
+    },
+    {
+      "kind": "test_run",
+      "summary": "48 passed, 0 failed — uv run pytest tests/test_workflow.py (after review feedback commit)",
+      "recorded_at": "2026-05-21T01:00:00Z"
     }
   ],
   "acceptance_criteria_check": [

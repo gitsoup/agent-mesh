@@ -37,8 +37,29 @@
       "result": "66 passed in 71.30s",
       "summary": "Full lane and workflow suites pass after the claim flow changes.",
       "created_at": "2026-05-21T15:38:04Z"
+    },
+    {
+      "kind": "test",
+      "command": "uv run pytest tests/test_workflow.py -q -k \"claim_creates_dedicated_worktree_when_required or claim_rejects_active_lane_via_workspace_id or claim_errors_when_all_lanes_are_active or claim_rejects_dirty_lane_worktree or claim_retry_errors_when_work_item_status_changes or claim_retries_after_push_conflict or claim_auto_selects_first_idle_lane or claim_reuses_named_lane_worktree or claim_recreates_missing_lane_worktree\"",
+      "result": "9 passed, 47 deselected in 19.74s",
+      "summary": "Addressed review feedback with coverage for active-lane rejection via workspace_id, all-lanes-active failure, dirty lane rejection, status-changed retry failure, and rechecked the legacy non-lane claim path.",
+      "created_at": "2026-05-21T19:27:16Z"
+    },
+    {
+      "kind": "test",
+      "command": "uv run pytest tests/test_lane.py tests/test_workflow.py -q",
+      "result": "70 passed in 78.07s",
+      "summary": "Full lane and workflow suites remain green after the review fixes.",
+      "created_at": "2026-05-21T19:27:16Z"
+    },
+    {
+      "kind": "review_response",
+      "command": "",
+      "result": "addressed",
+      "summary": "Blocked active-lane claims through both --lane and --workspace-id, made lane workspace preparation reject active branches instead of switching away from them, and added regression coverage for active, dirty, exhausted-lane, and status-change retry paths.",
+      "created_at": "2026-05-21T19:27:16Z"
     }
   ],
   "status": "pending_review",
-  "created_at": "2026-05-21T15:56:50Z"
+  "created_at": "2026-05-21T19:27:35Z"
 }

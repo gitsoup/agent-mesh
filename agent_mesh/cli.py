@@ -1182,6 +1182,18 @@ def default_worktree_path(repo_root: Path, workspace_id: str, configured_root: O
     return repo_root.parent / "{0}-{1}".format(repo_root.name, workspace_id)
 
 
+def _assert_lane_available(repo_root: Path, lane) -> None:
+    from agent_mesh.topology import inspect_lane_status
+
+    status = inspect_lane_status(lane)
+    if status.status == "active":
+        raise RuntimeError(
+            "lane '{0}' is active on branch {1}; choose an idle lane or omit --lane".format(
+                lane.name, status.current_branch or "<unknown>"
+            )
+        )
+
+
 def select_claim_lane(repo_root: Path, config, requested_lane: Optional[str], requested_workspace_id: Optional[str]):
     from agent_mesh.topology import inspect_lane_status
 
@@ -1198,17 +1210,14 @@ def select_claim_lane(repo_root: Path, config, requested_lane: Optional[str], re
         lane = lane_map.get(requested_lane)
         if lane is None:
             raise RuntimeError("lane '{0}' is not registered".format(requested_lane))
-        status = inspect_lane_status(lane)
-        if status.status == "active":
-            raise RuntimeError(
-                "lane '{0}' is active on branch {1}; choose an idle lane or omit --lane".format(
-                    lane.name, status.current_branch or "<unknown>"
-                )
-            )
+        _assert_lane_available(repo_root, lane)
         return lane
 
     if requested_workspace_id:
-        return lane_map.get(requested_workspace_id)
+        lane = lane_map.get(requested_workspace_id)
+        if lane is not None:
+            _assert_lane_available(repo_root, lane)
+        return lane
 
     for lane in lanes:
         status = inspect_lane_status(lane)
@@ -1315,6 +1324,13 @@ def ensure_lane_worktree_ready(
         raise RuntimeError(
             "lane worktree is dirty on branch {0}; clean it before claiming new work".format(
                 active_branch or "<detached>"
+            )
+        )
+
+    if active_branch and active_branch != base_branch:
+        raise RuntimeError(
+            "lane '{0}' is active on branch {1}; return it to {2} before claiming new work".format(
+                workspace_id, active_branch, base_branch
             )
         )
 

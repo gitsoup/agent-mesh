@@ -2,7 +2,7 @@
   "schema_version": "0.1",
   "id": "PR-MESH-9",
   "work_id": "MESH-9",
-  "status": "pending_review",
+  "status": "merged",
   "pr": {
     "url": "https://github.com/gitsoup/agent-mesh/pull/11",
     "number": 11,

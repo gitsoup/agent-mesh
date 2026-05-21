@@ -37,6 +37,49 @@ def init_repo(tmp_path: Path, monkeypatch, capsys) -> Path:
     return repo_root
 
 
+def init_real_repo(tmp_path: Path, monkeypatch, capsys, *, lanes: int = 0) -> Path:
+    repo_root = tmp_path / "demo-repo"
+    repo_root.mkdir(parents=True)
+    subprocess.run(["git", "init", "-b", "main"], cwd=repo_root, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "config", "user.email", "mesh@example.com"],
+        cwd=repo_root,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Agent Mesh Tests"],
+        cwd=repo_root,
+        check=True,
+        capture_output=True,
+    )
+    (repo_root / "README.md").write_text("demo\n", encoding="utf-8")
+    subprocess.run(["git", "add", "README.md"], cwd=repo_root, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "initial"], cwd=repo_root, check=True, capture_output=True)
+    monkeypatch.chdir(repo_root)
+
+    cli_args = [
+        "init",
+        "--project-name",
+        "demo",
+        "--project-key",
+        "APP",
+        "--provider",
+        "local",
+        "--adapters",
+        "generic,codex,claude",
+        "--worktree-policy",
+        "required",
+        "--yes",
+    ]
+    if lanes:
+        cli_args += ["--lanes", str(lanes)]
+    exit_code, output = run_cli(cli_args, capsys)
+    assert exit_code == 0
+    assert "Initialized Agent Mesh" in output
+    return repo_root
+
+
 def test_init_creates_agentic_scaffold(tmp_path: Path, monkeypatch, capsys) -> None:
     repo_root = init_repo(tmp_path, monkeypatch, capsys)
 
@@ -334,6 +377,220 @@ def test_claim_creates_dedicated_worktree_when_required(tmp_path: Path, monkeypa
     assert claim["worktree"] in output
     assert "[active]" in output
     assert "via {0}".format(claim["workspace_id"]) in output
+
+
+def test_claim_auto_selects_first_idle_lane(tmp_path: Path, monkeypatch, capsys) -> None:
+    repo_root = init_real_repo(tmp_path, monkeypatch, capsys, lanes=2)
+    assert run_cli(["task", "add", "Implement auth endpoint", "--module", "api"], capsys)[0] == 0
+
+    config = json.loads((repo_root / ".agentic/project.json").read_text(encoding="utf-8"))
+    first_lane = config["coordination"]["lanes"][0]
+    coordination_root = repo_root.parent / "{0}-mesh-state".format(repo_root.name)
+
+    exit_code, output = run_cli(
+        ["claim", "APP-1", "--agent", "codex", "--role", "implementer", "--no-push"],
+        capsys,
+    )
+    assert exit_code == 0
+    assert "Workspace: {0}".format(first_lane["workspace_id"]) in output
+    assert "REQUIRED: cd {0}".format(first_lane["worktree_path"]) in output
+
+    claim = json.loads((coordination_root / ".agentic/claims/APP-1.json").read_text(encoding="utf-8"))
+    assert claim["workspace_id"] == first_lane["workspace_id"]
+    assert claim["worktree"] == first_lane["worktree_path"]
+
+    branch = subprocess.run(
+        ["git", "branch", "--show-current"],
+        cwd=Path(first_lane["worktree_path"]),
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert branch.stdout.strip() == "feat/APP-1-implement-auth-endpoint"
+
+
+def test_claim_reuses_named_lane_worktree(tmp_path: Path, monkeypatch, capsys) -> None:
+    repo_root = init_real_repo(tmp_path, monkeypatch, capsys, lanes=1)
+    assert run_cli(["task", "add", "Implement auth endpoint", "--module", "api"], capsys)[0] == 0
+
+    config = json.loads((repo_root / ".agentic/project.json").read_text(encoding="utf-8"))
+    lane = config["coordination"]["lanes"][0]
+    coordination_root = repo_root.parent / "{0}-mesh-state".format(repo_root.name)
+
+    exit_code, output = run_cli(
+        ["claim", "APP-1", "--lane", lane["name"], "--agent", "codex", "--role", "implementer", "--no-push"],
+        capsys,
+    )
+    assert exit_code == 0
+    assert "Worktree: {0}".format(lane["worktree_path"]) in output
+
+    claim = json.loads((coordination_root / ".agentic/claims/APP-1.json").read_text(encoding="utf-8"))
+    assert claim["workspace_id"] == lane["workspace_id"]
+    assert claim["worktree"] == lane["worktree_path"]
+
+
+def test_claim_rejects_active_lane_via_workspace_id(tmp_path: Path, monkeypatch, capsys) -> None:
+    repo_root = init_real_repo(tmp_path, monkeypatch, capsys, lanes=2)
+    assert run_cli(["task", "add", "First task", "--module", "api"], capsys)[0] == 0
+    assert run_cli(["task", "add", "Second task", "--module", "api"], capsys)[0] == 0
+
+    config = json.loads((repo_root / ".agentic/project.json").read_text(encoding="utf-8"))
+    lane = config["coordination"]["lanes"][0]
+
+    exit_code, _ = run_cli(
+        ["claim", "APP-1", "--lane", lane["name"], "--agent", "codex", "--role", "implementer", "--no-push"],
+        capsys,
+    )
+    assert exit_code == 0
+
+    exit_code, output = run_cli(
+        ["claim", "APP-2", "--workspace-id", lane["workspace_id"], "--agent", "codex", "--role", "implementer", "--no-push"],
+        capsys,
+    )
+    assert exit_code == 1
+    assert "is active on branch feat/APP-1-first-task" in output
+
+
+def test_claim_recreates_missing_lane_worktree(tmp_path: Path, monkeypatch, capsys) -> None:
+    repo_root = init_real_repo(tmp_path, monkeypatch, capsys, lanes=1)
+    assert run_cli(["task", "add", "Implement auth endpoint", "--module", "api"], capsys)[0] == 0
+
+    config = json.loads((repo_root / ".agentic/project.json").read_text(encoding="utf-8"))
+    lane = config["coordination"]["lanes"][0]
+    lane_path = Path(lane["worktree_path"])
+    subprocess.run(["git", "worktree", "remove", "--force", str(lane_path)], cwd=repo_root, check=True, capture_output=True)
+    assert not lane_path.exists()
+
+    exit_code, output = run_cli(
+        ["claim", "APP-1", "--lane", lane["name"], "--agent", "codex", "--role", "implementer", "--no-push"],
+        capsys,
+    )
+    assert exit_code == 0
+    assert lane_path.exists()
+    assert "REQUIRED: cd {0}".format(lane_path) in output
+
+
+def test_claim_errors_when_all_lanes_are_active(tmp_path: Path, monkeypatch, capsys) -> None:
+    repo_root = init_real_repo(tmp_path, monkeypatch, capsys, lanes=2)
+    assert run_cli(["task", "add", "First task", "--module", "api"], capsys)[0] == 0
+    assert run_cli(["task", "add", "Second task", "--module", "api"], capsys)[0] == 0
+    assert run_cli(["task", "add", "Third task", "--module", "api"], capsys)[0] == 0
+
+    config = json.loads((repo_root / ".agentic/project.json").read_text(encoding="utf-8"))
+    lanes = config["coordination"]["lanes"]
+
+    assert run_cli(
+        ["claim", "APP-1", "--lane", lanes[0]["name"], "--agent", "codex", "--role", "implementer", "--no-push"],
+        capsys,
+    )[0] == 0
+    assert run_cli(
+        ["claim", "APP-2", "--lane", lanes[1]["name"], "--agent", "codex", "--role", "implementer", "--no-push"],
+        capsys,
+    )[0] == 0
+
+    exit_code, output = run_cli(
+        ["claim", "APP-3", "--agent", "codex", "--role", "implementer", "--no-push"],
+        capsys,
+    )
+    assert exit_code == 1
+    assert "no idle lanes available" in output
+
+
+def test_claim_rejects_dirty_lane_worktree(tmp_path: Path, monkeypatch, capsys) -> None:
+    repo_root = init_real_repo(tmp_path, monkeypatch, capsys, lanes=1)
+    assert run_cli(["task", "add", "Implement auth endpoint", "--module", "api"], capsys)[0] == 0
+
+    config = json.loads((repo_root / ".agentic/project.json").read_text(encoding="utf-8"))
+    lane = config["coordination"]["lanes"][0]
+    lane_path = Path(lane["worktree_path"])
+    (lane_path / "scratch.txt").write_text("dirty\n", encoding="utf-8")
+
+    exit_code, output = run_cli(
+        ["claim", "APP-1", "--lane", lane["name"], "--agent", "codex", "--role", "implementer", "--no-push"],
+        capsys,
+    )
+    assert exit_code == 1
+    assert "lane worktree is dirty on branch wt/{0}".format(lane["workspace_id"]) in output
+
+
+def test_claim_retries_after_push_conflict(tmp_path: Path, monkeypatch, capsys) -> None:
+    from subprocess import CompletedProcess
+
+    repo_root = init_real_repo(tmp_path, monkeypatch, capsys, lanes=1)
+    assert run_cli(["task", "add", "Implement auth endpoint", "--module", "api"], capsys)[0] == 0
+    coordination_root = repo_root.parent / "{0}-mesh-state".format(repo_root.name)
+    claim_path = coordination_root / ".agentic/claims/APP-1.json"
+
+    push_attempts = {"count": 0}
+
+    monkeypatch.setattr("agent_mesh.cli.coordination_remote_exists", lambda _: True)
+
+    def fake_push(_coordination_root, _branch):
+        push_attempts["count"] += 1
+        if push_attempts["count"] == 1:
+            return CompletedProcess(
+                args=["git", "push"],
+                returncode=1,
+                stdout="",
+                stderr="! [rejected] HEAD -> mesh/state (fetch first)",
+            )
+        return CompletedProcess(args=["git", "push"], returncode=0, stdout="", stderr="")
+
+    def fake_sync(_coordination_root, _branch):
+        if claim_path.exists():
+            claim_path.unlink()
+
+    monkeypatch.setattr("agent_mesh.cli.push_coordination_state", fake_push)
+    monkeypatch.setattr("agent_mesh.cli.sync_coordination_state_from_remote", fake_sync)
+
+    exit_code, output = run_cli(
+        ["claim", "APP-1", "--agent", "codex", "--role", "implementer"],
+        capsys,
+    )
+    assert exit_code == 0
+    assert "Claimed APP-1" in output
+    assert push_attempts["count"] == 2
+    assert claim_path.exists()
+
+
+def test_claim_retry_errors_when_work_item_status_changes(tmp_path: Path, monkeypatch, capsys) -> None:
+    from subprocess import CompletedProcess
+
+    repo_root = init_real_repo(tmp_path, monkeypatch, capsys, lanes=1)
+    assert run_cli(["task", "add", "Implement auth endpoint", "--module", "api"], capsys)[0] == 0
+    coordination_root = repo_root.parent / "{0}-mesh-state".format(repo_root.name)
+    claim_path = coordination_root / ".agentic/claims/APP-1.json"
+    work_path = coordination_root / ".agentic/work/APP-1.json"
+
+    push_attempts = {"count": 0}
+    monkeypatch.setattr("agent_mesh.cli.coordination_remote_exists", lambda _: True)
+
+    def fake_push(_coordination_root, _branch):
+        push_attempts["count"] += 1
+        return CompletedProcess(
+            args=["git", "push"],
+            returncode=1,
+            stdout="",
+            stderr="! [rejected] HEAD -> mesh/state (fetch first)",
+        )
+
+    def fake_sync(_coordination_root, _branch):
+        if claim_path.exists():
+            claim_path.unlink()
+        work_item = json.loads(work_path.read_text(encoding="utf-8"))
+        work_item["status"] = "done"
+        work_path.write_text(json.dumps(work_item, indent=2) + "\n", encoding="utf-8")
+
+    monkeypatch.setattr("agent_mesh.cli.push_coordination_state", fake_push)
+    monkeypatch.setattr("agent_mesh.cli.sync_coordination_state_from_remote", fake_sync)
+
+    exit_code, output = run_cli(
+        ["claim", "APP-1", "--agent", "codex", "--role", "implementer"],
+        capsys,
+    )
+    assert exit_code == 1
+    assert "claim lost push race for APP-1; work item is now done" in output
+    assert push_attempts["count"] == 1
 
 
 def test_init_creates_coordination_worktree_for_real_git_repo(

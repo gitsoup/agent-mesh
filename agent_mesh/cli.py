@@ -134,6 +134,7 @@ def build_parser() -> argparse.ArgumentParser:
     claim_parser.add_argument("--agent", default="agent")
     claim_parser.add_argument("--role", default="implementer")
     claim_parser.add_argument("--machine", default=socket.gethostname())
+    claim_parser.add_argument("--lane")
     claim_parser.add_argument("--workspace-id")
     claim_parser.add_argument("--worktree")
     claim_parser.add_argument("--branch")
@@ -652,15 +653,26 @@ def handle_claim(args: argparse.Namespace) -> int:
 
     now = utc_now()
     branch = args.branch or "feat/{0}-{1}".format(args.work_id, slugify(work_item.title))
-    workspace_id = args.workspace_id or derive_workspace_id(args.agent, args.machine)
     try:
-        worktree = prepare_claim_workspace(
-            repo_root,
-            config.default_branch,
-            branch,
-            workspace_id,
-            args.worktree,
-        )
+        selected_lane = select_claim_lane(repo_root, config, args.lane, args.workspace_id)
+        if selected_lane is not None:
+            workspace_id = selected_lane.workspace_id
+            worktree = prepare_lane_claim_workspace(
+                repo_root,
+                config,
+                branch,
+                selected_lane,
+                args.worktree,
+            )
+        else:
+            workspace_id = args.workspace_id or derive_workspace_id(args.agent, args.machine)
+            worktree = prepare_claim_workspace(
+                repo_root,
+                config.default_branch,
+                branch,
+                workspace_id,
+                args.worktree,
+            )
     except RuntimeError as error:
         emit("ERROR: {0}".format(error))
         return 1
@@ -684,11 +696,22 @@ def handle_claim(args: argparse.Namespace) -> int:
             )
         ],
     )
-    save_model_json(existing_claim_path, claim)
-
     work_item.status = "in_progress"
     work_item.updated_at = now
-    save_model_json(work_path, work_item)
+    try:
+        persist_new_claim_state(
+            repo_root,
+            coordination_root,
+            config,
+            work_item,
+            work_path,
+            claim,
+            existing_claim_path,
+            no_push=args.no_push,
+        )
+    except RuntimeError as error:
+        emit("ERROR: {0}".format(error))
+        return 1
     emit("Claimed {0} on branch {1}".format(args.work_id, branch))
     if worktree is not None:
         emit("Worktree: {0}".format(worktree))
@@ -1136,6 +1159,11 @@ def branch_exists(repo_root: Path, branch: str) -> bool:
     return result.returncode == 0
 
 
+def ref_exists(repo_root: Path, ref: str) -> bool:
+    result = run_git(repo_root, ["show-ref", "--verify", "--quiet", ref])
+    return result.returncode == 0
+
+
 def ensure_git_ok(result: subprocess.CompletedProcess[str], action: str) -> None:
     if result.returncode == 0:
         return
@@ -1152,6 +1180,87 @@ def default_worktree_path(repo_root: Path, workspace_id: str, configured_root: O
             root_path = root_path.resolve()
         return root_path / "{0}-{1}".format(repo_root.name, workspace_id)
     return repo_root.parent / "{0}-{1}".format(repo_root.name, workspace_id)
+
+
+def _assert_lane_available(repo_root: Path, lane) -> None:
+    from agent_mesh.topology import inspect_lane_status
+
+    status = inspect_lane_status(lane)
+    if status.status == "active":
+        raise RuntimeError(
+            "lane '{0}' is active on branch {1}; choose an idle lane or omit --lane".format(
+                lane.name, status.current_branch or "<unknown>"
+            )
+        )
+
+
+def select_claim_lane(repo_root: Path, config, requested_lane: Optional[str], requested_workspace_id: Optional[str]):
+    from agent_mesh.topology import inspect_lane_status
+
+    lanes = config.coordination.lanes
+    if not lanes:
+        return None
+
+    lane_map = {}
+    for lane in lanes:
+        lane_map[lane.name] = lane
+        lane_map[lane.workspace_id] = lane
+
+    if requested_lane:
+        lane = lane_map.get(requested_lane)
+        if lane is None:
+            raise RuntimeError("lane '{0}' is not registered".format(requested_lane))
+        _assert_lane_available(repo_root, lane)
+        return lane
+
+    if requested_workspace_id:
+        lane = lane_map.get(requested_workspace_id)
+        if lane is not None:
+            _assert_lane_available(repo_root, lane)
+        return lane
+
+    for lane in lanes:
+        status = inspect_lane_status(lane)
+        if status.status == "idle":
+            return lane
+    for lane in lanes:
+        status = inspect_lane_status(lane)
+        if status.status == "missing":
+            return lane
+    raise RuntimeError("no idle lanes available; run mesh lane list or specify --lane")
+
+
+def prepare_lane_claim_workspace(
+    repo_root: Path,
+    config,
+    branch: str,
+    lane,
+    requested_worktree: Optional[str],
+) -> str:
+    from agent_mesh.topology import provision_lane
+
+    lane_path = Path(lane.worktree_path).expanduser().resolve()
+    if requested_worktree:
+        requested_path = Path(requested_worktree).expanduser()
+        requested_path = (repo_root / requested_path).resolve() if not requested_path.is_absolute() else requested_path.resolve()
+        if requested_path != lane_path:
+            raise RuntimeError(
+                "lane '{0}' is bound to worktree {1}; requested {2}".format(
+                    lane.name, lane_path, requested_path
+                )
+            )
+
+    if config.coordination.worktree_policy == "off":
+        return str(lane_path)
+
+    if lane_path.exists() and not (lane_path / ".git").exists():
+        raise RuntimeError("lane worktree path already exists and is not a git worktree: {0}".format(lane_path))
+
+    if not lane_path.exists():
+        lane_path = provision_lane(repo_root, config, lane.workspace_id).resolve()
+
+    ensure_lane_worktree_ready(repo_root, lane_path, config.default_branch, lane.workspace_id, branch)
+    return str(lane_path)
 
 
 def prepare_claim_workspace(
@@ -1197,6 +1306,53 @@ def prepare_claim_workspace(
     return str(worktree_path)
 
 
+def ensure_lane_worktree_ready(
+    repo_root: Path,
+    worktree_path: Path,
+    default_branch: str,
+    workspace_id: str,
+    branch: str,
+) -> None:
+    base_branch = "wt/{0}".format(workspace_id)
+    current_branch = run_git(worktree_path, ["branch", "--show-current"])
+    ensure_git_ok(current_branch, "failed to inspect lane worktree branch")
+    active_branch = current_branch.stdout.strip()
+
+    dirty = run_git(worktree_path, ["status", "--porcelain"])
+    ensure_git_ok(dirty, "failed to inspect lane worktree status")
+    if dirty.stdout.strip():
+        raise RuntimeError(
+            "lane worktree is dirty on branch {0}; clean it before claiming new work".format(
+                active_branch or "<detached>"
+            )
+        )
+
+    if active_branch and active_branch != base_branch:
+        raise RuntimeError(
+            "lane '{0}' is active on branch {1}; return it to {2} before claiming new work".format(
+                workspace_id, active_branch, base_branch
+            )
+        )
+
+    if active_branch != base_branch:
+        switch_result = run_git(worktree_path, ["switch", base_branch])
+        ensure_git_ok(switch_result, "failed to reset lane to its base branch")
+
+    reset_target = "origin/{0}".format(default_branch)
+    if not ref_exists(repo_root, "refs/remotes/{0}".format(reset_target)):
+        reset_target = default_branch
+    reset_result = run_git(worktree_path, ["reset", "--hard", reset_target])
+    ensure_git_ok(reset_result, "failed to sync lane base branch")
+
+    if branch_exists(repo_root, branch):
+        switch_result = run_git(worktree_path, ["switch", branch])
+        ensure_git_ok(switch_result, "failed to switch lane worktree to existing task branch")
+        return
+
+    switch_result = run_git(worktree_path, ["switch", "-c", branch, base_branch])
+    ensure_git_ok(switch_result, "failed to create task branch from lane base branch")
+
+
 def ensure_worktree_ready(
     repo_root: Path,
     worktree_path: Path,
@@ -1225,6 +1381,96 @@ def ensure_worktree_ready(
 
     switch_result = run_git(worktree_path, ["switch", "-c", branch, default_branch])
     ensure_git_ok(switch_result, "failed to switch reusable worktree to a new branch")
+
+
+def coordination_remote_exists(coordination_root: Path) -> bool:
+    result = run_git(coordination_root, ["remote", "get-url", "origin"])
+    return result.returncode == 0
+
+
+def coordination_push_conflict(detail: str) -> bool:
+    lowered = detail.lower()
+    return "non-fast-forward" in lowered or "fetch first" in lowered or "rejected" in lowered
+
+
+def commit_coordination_state(coordination_root: Path, paths: Sequence[Path], message: str) -> None:
+    relative_paths = [str(path.relative_to(coordination_root)) for path in paths]
+    ensure_git_ok(run_git(coordination_root, ["add", *relative_paths]), "failed to stage coordination state")
+    pending = run_git(coordination_root, ["status", "--porcelain", "--", *relative_paths])
+    ensure_git_ok(pending, "failed to inspect coordination state changes")
+    if not pending.stdout.strip():
+        return
+    commit = run_git(coordination_root, ["commit", "-m", message])
+    ensure_git_ok(commit, "failed to commit coordination state")
+
+
+def push_coordination_state(coordination_root: Path, branch: str) -> subprocess.CompletedProcess[str]:
+    return run_git(coordination_root, ["push", "origin", "HEAD:{0}".format(branch)])
+
+
+def sync_coordination_state_from_remote(coordination_root: Path, branch: str) -> None:
+    fetch = run_git(coordination_root, ["fetch", "origin", branch])
+    ensure_git_ok(fetch, "failed to fetch latest coordination state")
+    reset = run_git(coordination_root, ["reset", "--hard", "origin/{0}".format(branch)])
+    ensure_git_ok(reset, "failed to reset coordination state after push conflict")
+
+
+def persist_new_claim_state(
+    repo_root: Path,
+    coordination_root: Path,
+    config,
+    work_item,
+    work_path: Path,
+    claim,
+    claim_path: Path,
+    *,
+    no_push: bool,
+    max_attempts: int = 2,
+) -> None:
+    from agent_mesh.state.models import Claim, WorkItem
+    from agent_mesh.state.storage import load_model, save_model_json
+
+    attempts = 0
+    while True:
+        attempts += 1
+        save_model_json(claim_path, claim)
+        save_model_json(work_path, work_item)
+
+        if not git_head_available(coordination_root):
+            return
+
+        commit_coordination_state(
+            coordination_root,
+            [claim_path, work_path],
+            "Claim {0} via {1}".format(claim.work_id, claim.workspace_id or "workspace"),
+        )
+
+        if no_push or not coordination_remote_exists(coordination_root):
+            return
+
+        push_result = push_coordination_state(coordination_root, config.coordination.branch)
+        if push_result.returncode == 0:
+            return
+
+        detail = (push_result.stderr or push_result.stdout).strip() or "unknown git error"
+        if attempts >= max_attempts or not coordination_push_conflict(detail):
+            raise RuntimeError("failed to push claim state: {0}".format(detail))
+
+        sync_coordination_state_from_remote(coordination_root, config.coordination.branch)
+        if claim_path.exists():
+            live_claim = load_model(claim_path, Claim)
+            raise RuntimeError(
+                "claim lost push race for {0}; it is now owned by {1}".format(
+                    claim.work_id, live_claim.claimed_by
+                )
+            )
+        refreshed_work = load_model(work_path, WorkItem)
+        if refreshed_work.status not in ["ready", "in_progress"]:
+            raise RuntimeError(
+                "claim lost push race for {0}; work item is now {1}".format(
+                    claim.work_id, refreshed_work.status
+                )
+            )
 
 
 def release_stale_worktree_branch(claim) -> None:

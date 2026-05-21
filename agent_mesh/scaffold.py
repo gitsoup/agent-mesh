@@ -160,7 +160,10 @@ def init_repo(
     """
     created: List[Path] = []
     skipped: List[Path] = []
-    agentic_root = coordination_root if coordination_root is not None else repo_root
+    # state_root: where live coordination files (work, claims, reviews, handoffs) go.
+    # Config and definition files always stay in repo_root so load_project_config(repo_root)
+    # is always authoritative and there is exactly one project.json.
+    state_root = coordination_root if coordination_root is not None else repo_root
     selected_adapters = normalize_adapters(adapters)
 
     config = ProjectConfig(
@@ -183,33 +186,42 @@ def init_repo(
         dashboard={"enabled": dashboard, "output_dir": ".agentic/dashboard"},
     )
 
-    required_directories = [
-        agentic_root / ".agentic",
-        agentic_root / ".agentic/context",
-        agentic_root / ".agentic/context/adr",
-        agentic_root / ".agentic/work",
-        agentic_root / ".agentic/claims",
-        agentic_root / ".agentic/claims/archive",
-        agentic_root / ".agentic/reviews",
-        agentic_root / ".agentic/handoffs",
-        agentic_root / ".agentic/workflows",
-        agentic_root / ".agentic/skills",
-        agentic_root / ".agentic/adapters",
+    # Config/definition directories always go to repo_root
+    config_directories = [
+        repo_root / ".agentic",
+        repo_root / ".agentic/context",
+        repo_root / ".agentic/context/adr",
+        repo_root / ".agentic/workflows",
+        repo_root / ".agentic/skills",
+        repo_root / ".agentic/adapters",
         repo_root / ".github/workflows",
     ]
+    # Live-state directories go to state_root (= coordination_root when set)
+    state_directories = [
+        state_root / ".agentic",
+        state_root / ".agentic/work",
+        state_root / ".agentic/claims",
+        state_root / ".agentic/claims/archive",
+        state_root / ".agentic/reviews",
+        state_root / ".agentic/handoffs",
+    ]
     if dashboard:
-        required_directories.append(agentic_root / ".agentic/dashboard")
+        state_directories.append(state_root / ".agentic/dashboard")
 
-    for directory in required_directories:
-        ensure_directory(directory)
+    seen: set = set()
+    for directory in config_directories + state_directories:
+        if directory not in seen:
+            ensure_directory(directory)
+            seen.add(directory)
 
+    # project.json and config.toml always go to repo_root — one authoritative copy
     record_result(
-        write_json(agentic_root / ".agentic/project.json", config.model_dump(), force=force),
+        write_json(repo_root / ".agentic/project.json", config.model_dump(), force=True),
         created,
         skipped,
     )
     record_result(
-        write_text(agentic_root / ".agentic/config.toml", render_config_toml(config), force=force),
+        write_text(repo_root / ".agentic/config.toml", render_config_toml(config), force=force),
         created,
         skipped,
     )
@@ -220,7 +232,7 @@ def init_repo(
     )
     record_result(
         write_text(
-            agentic_root / ".agentic/context/CONTEXT.md",
+            repo_root / ".agentic/context/CONTEXT.md",
             "# Context\n\nDocument stable domain language, key concepts, and durable decisions here.\n",
             force=force,
         ),
@@ -229,7 +241,7 @@ def init_repo(
     )
     record_result(
         write_text(
-            agentic_root / ".agentic/context/CONTEXT-MAP.md",
+            repo_root / ".agentic/context/CONTEXT-MAP.md",
             "# Context Map\n\nMap major modules, boundaries, and where durable context lives.\n",
             force=force,
         ),
@@ -238,7 +250,7 @@ def init_repo(
     )
     record_result(
         write_text(
-            agentic_root / ".agentic/context/adr/README.md",
+            repo_root / ".agentic/context/adr/README.md",
             "# ADRs\n\nStore architecture decision records here when decisions are durable and hard to reverse.\n",
             force=force,
         ),
@@ -246,10 +258,11 @@ def init_repo(
         skipped,
     )
 
+    # State README files go to state_root (coordination worktree when set)
     for folder_name in ["work", "claims", "reviews", "handoffs", "adapters"]:
         record_result(
             write_text(
-                agentic_root / ".agentic" / folder_name / "README.md",
+                state_root / ".agentic" / folder_name / "README.md",
                 "# README\n\nThis directory stores human-readable Agent Mesh coordination state.\n",
                 force=force,
             ),
@@ -258,7 +271,7 @@ def init_repo(
         )
     record_result(
         write_text(
-            agentic_root / ".agentic/claims/archive/README.md",
+            state_root / ".agentic/claims/archive/README.md",
             "# Archived Claims\n\nThis directory stores completed or superseded claim records.\n",
             force=force,
         ),
@@ -266,10 +279,11 @@ def init_repo(
         skipped,
     )
 
+    # Workflow and skill definitions go to repo_root
     for skill in SKILLS:
         record_result(
             write_text(
-                agentic_root / ".agentic/workflows" / "{0}.md".format(skill.name),
+                repo_root / ".agentic/workflows" / "{0}.md".format(skill.name),
                 render_workflow(skill),
                 force=force,
             ),
@@ -277,7 +291,7 @@ def init_repo(
             skipped,
         )
 
-        skill_dir = agentic_root / ".agentic/skills" / skill.name
+        skill_dir = repo_root / ".agentic/skills" / skill.name
         ensure_directory(skill_dir)
         record_result(
             write_text(skill_dir / "SKILL.md", render_skill(skill), force=force),

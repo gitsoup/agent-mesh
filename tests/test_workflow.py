@@ -499,6 +499,45 @@ def test_sync_recreates_missing_coordination_worktree(tmp_path: Path, monkeypatc
     assert coordination_path.exists()
 
 
+def test_coordination_worktree_uses_orphan_branch(tmp_path: Path, monkeypatch, capsys) -> None:
+    """mesh/state must be an orphan branch with no shared history with main."""
+    repo_root = tmp_path / "demo-repo"
+    repo_root.mkdir(parents=True)
+    subprocess.run(["git", "init", "-b", "main"], cwd=repo_root, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.email", "mesh@example.com"], cwd=repo_root, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.name", "Agent Mesh Tests"], cwd=repo_root, check=True, capture_output=True)
+    (repo_root / "README.md").write_text("demo\n", encoding="utf-8")
+    subprocess.run(["git", "add", "README.md"], cwd=repo_root, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "initial"], cwd=repo_root, check=True, capture_output=True)
+    monkeypatch.chdir(repo_root)
+
+    exit_code, _ = run_cli(
+        ["init", "--project-name", "demo", "--project-key", "APP", "--provider", "local",
+         "--adapters", "generic,codex,claude", "--worktree-policy", "required", "--yes"],
+        capsys,
+    )
+    assert exit_code == 0
+
+    # The root commit of mesh/state must have no parent (orphan chain)
+    root_result = subprocess.run(
+        ["git", "rev-list", "--max-parents=0", "mesh/state"],
+        cwd=repo_root, capture_output=True, text=True, check=True
+    )
+    root_commit = root_result.stdout.strip()
+    parent_result = subprocess.run(
+        ["git", "rev-parse", "{0}^".format(root_commit)],
+        cwd=repo_root, capture_output=True, text=True
+    )
+    assert parent_result.returncode != 0, "root commit of mesh/state must have no parent (orphan branch)"
+
+    # mesh/state and main must share no common ancestor
+    main_root = subprocess.run(
+        ["git", "rev-list", "--max-parents=0", "main"],
+        cwd=repo_root, capture_output=True, text=True, check=True
+    ).stdout.strip()
+    assert root_commit != main_root, "mesh/state and main must have different root commits (no shared history)"
+
+
 def test_claim_resume_updates_existing_claim(tmp_path: Path, monkeypatch, capsys) -> None:
     repo_root = init_repo(tmp_path, monkeypatch, capsys)
 
@@ -594,7 +633,7 @@ def test_claim_takeover_reassigns_stale_claim(tmp_path: Path, monkeypatch, capsy
 
 
 def test_review_shows_acceptance_criteria_from_shared_root(tmp_path: Path, monkeypatch, capsys) -> None:
-    repo_root, coordination_root, claim = _setup_repo_with_claim(tmp_path, monkeypatch, capsys)
+    repo_root, _, claim = _setup_repo_with_claim(tmp_path, monkeypatch, capsys)
     monkeypatch.chdir(Path(claim["worktree"]))
     assert run_cli(["pr", "--dry-run", "--work-id", "APP-1"], capsys)[0] == 0
 
@@ -649,7 +688,7 @@ def test_review_renders_evidence_when_present_and_omits_when_absent(tmp_path: Pa
 
 
 def test_review_output_is_identical_from_worktree_and_shared_root(tmp_path: Path, monkeypatch, capsys) -> None:
-    repo_root, coordination_root, claim = _setup_repo_with_claim(tmp_path, monkeypatch, capsys)
+    repo_root, _, claim = _setup_repo_with_claim(tmp_path, monkeypatch, capsys)
     monkeypatch.chdir(Path(claim["worktree"]))
     assert run_cli(["pr", "--dry-run", "--work-id", "APP-1"], capsys)[0] == 0
 
@@ -661,7 +700,7 @@ def test_review_output_is_identical_from_worktree_and_shared_root(tmp_path: Path
 
 
 def test_review_works_when_worktree_policy_off(tmp_path: Path, monkeypatch, capsys) -> None:
-    repo_root, coordination_root, claim = _setup_repo_with_claim(tmp_path, monkeypatch, capsys, worktree_policy="off")
+    repo_root, _, claim = _setup_repo_with_claim(tmp_path, monkeypatch, capsys, worktree_policy="off")
     assert not claim.get("worktree"), "precondition: worktree_policy=off must not record a worktree"
     assert run_cli(["pr", "--dry-run", "--work-id", "APP-1"], capsys)[0] == 0
 
@@ -672,7 +711,7 @@ def test_review_works_when_worktree_policy_off(tmp_path: Path, monkeypatch, caps
 
 
 def test_review_errors_on_missing_packet(tmp_path: Path, monkeypatch, capsys) -> None:
-    repo_root, coordination_root, _ = _setup_repo_with_claim(tmp_path, monkeypatch, capsys)
+    repo_root, _, _ = _setup_repo_with_claim(tmp_path, monkeypatch, capsys)
     monkeypatch.chdir(repo_root)
     exit_code, output = run_cli(["review", "PR-APP-NONEXISTENT"], capsys)
     assert exit_code == 1
@@ -1155,7 +1194,7 @@ def _setup_repo_with_claim(tmp_path: Path, monkeypatch, capsys, *, worktree_poli
 
 
 def test_pr_workspace_guard_blocks_run_from_wrong_directory(tmp_path: Path, monkeypatch, capsys) -> None:
-    repo_root, coordination_root, claim = _setup_repo_with_claim(tmp_path, monkeypatch, capsys)
+    repo_root, _, claim = _setup_repo_with_claim(tmp_path, monkeypatch, capsys)
     # remain in shared root — wrong location for mesh pr
     monkeypatch.chdir(repo_root)
     exit_code, output = run_cli(["pr", "--dry-run", "--work-id", "APP-1"], capsys)
@@ -1166,7 +1205,7 @@ def test_pr_workspace_guard_blocks_run_from_wrong_directory(tmp_path: Path, monk
 
 
 def test_pr_workspace_guard_passes_from_correct_worktree(tmp_path: Path, monkeypatch, capsys) -> None:
-    repo_root, coordination_root, claim = _setup_repo_with_claim(tmp_path, monkeypatch, capsys)
+    repo_root, _, claim = _setup_repo_with_claim(tmp_path, monkeypatch, capsys)
     monkeypatch.chdir(Path(claim["worktree"]))
     exit_code, output = run_cli(["pr", "--dry-run", "--work-id", "APP-1"], capsys)
     assert exit_code == 0
@@ -1174,7 +1213,7 @@ def test_pr_workspace_guard_passes_from_correct_worktree(tmp_path: Path, monkeyp
 
 
 def test_pr_workspace_guard_skipped_when_no_worktree_recorded(tmp_path: Path, monkeypatch, capsys) -> None:
-    repo_root, coordination_root, claim = _setup_repo_with_claim(tmp_path, monkeypatch, capsys, worktree_policy="off")
+    repo_root, _, claim = _setup_repo_with_claim(tmp_path, monkeypatch, capsys, worktree_policy="off")
     assert not claim.get("worktree"), "precondition: worktree_policy=off must not record a worktree"
     monkeypatch.chdir(repo_root)
     exit_code, output = run_cli(["pr", "--dry-run", "--work-id", "APP-1"], capsys)

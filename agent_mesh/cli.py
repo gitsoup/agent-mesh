@@ -207,7 +207,7 @@ def handle_init(args: argparse.Namespace) -> int:
             # load_project_config works, then move to coordination worktree.
             _bootstrap_project_json(
                 repo_root, project_name, project_key, args.provider,
-                args.dashboard, args.worktree_policy, args.worktree_root,
+                adapters, args.dashboard, args.worktree_policy, args.worktree_root,
                 args.claim_stale_after_minutes,
             )
             coordination = ensure_coordination_worktree(repo_root, load_project_config(repo_root))
@@ -246,12 +246,17 @@ def _bootstrap_project_json(
     project_name: str,
     project_key: str,
     provider: str,
+    adapters: list,
     dashboard: bool,
     worktree_policy: str,
     worktree_root: str | None,
     claim_stale_after_minutes: int,
 ) -> None:
-    """Write a minimal project.json to repo_root so topology helpers can load config."""
+    """Write project.json to repo_root so topology helpers can load config before init_repo runs.
+
+    Uses the actual adapter list so the bootstrap and the final config are identical.
+    init_repo overwrites this file (force=True for project.json) with the full config.
+    """
     from agent_mesh.state.storage import atomic_write_json
     project_json = repo_root / ".agentic/project.json"
     if project_json.exists():
@@ -275,22 +280,35 @@ def _bootstrap_project_json(
             "coordination_worktree": None,
             "claim_stale_after_minutes": claim_stale_after_minutes,
         },
-        "adapters": ["generic"],
+        "adapters": adapters,
         "runner": {"default": "local_manual"},
         "dashboard": {"enabled": dashboard, "output_dir": ".agentic/dashboard"},
     })
 
 
 def _commit_coordination_scaffold(coordination_root: Path) -> None:
-    """Commit the initial .agentic/ scaffold to the coordination branch."""
+    """Commit the initial .agentic/ state scaffold to the coordination branch.
+
+    Emits a warning if the commit fails — the scaffold is still usable in the
+    current session but will not survive worktree removal.
+    """
     import subprocess as _sp
-    _sp.run(["git", "add", ".agentic/"], cwd=coordination_root, check=False, capture_output=True)
-    _sp.run(
+    add = _sp.run(["git", "add", ".agentic/"], cwd=coordination_root, check=False, capture_output=True)
+    if add.returncode != 0:
+        emit("WARN: could not stage coordination scaffold for commit: {0}".format(
+            add.stderr.decode(errors="replace").strip() or add.stdout.decode(errors="replace").strip()
+        ))
+        return
+    commit = _sp.run(
         ["git", "commit", "-m", "Initialize .agentic/ coordination scaffold"],
         cwd=coordination_root,
         check=False,
         capture_output=True,
     )
+    if commit.returncode != 0:
+        emit("WARN: could not commit coordination scaffold: {0}".format(
+            commit.stderr.decode(errors="replace").strip() or commit.stdout.decode(errors="replace").strip()
+        ))
 
 
 def handle_doctor(_: argparse.Namespace) -> int:
@@ -560,15 +578,19 @@ def handle_pr(args: argparse.Namespace) -> int:
     work_item = load_model(coordination_root / ".agentic/work" / "{0}.json".format(args.work_id), WorkItem)
     claim = load_model(coordination_root / ".agentic/claims" / "{0}.json".format(args.work_id), Claim)
 
-    if claim.worktree and Path(claim.worktree).exists():
-        current_path = Path.cwd().resolve()
-        target_worktree = Path(claim.worktree).resolve()
-        if current_path != target_worktree:
-            emit("ERROR: mesh pr must be run from the claimed worktree.")
-            emit("Current: {0}".format(current_path))
-            emit("Expected: {0}".format(target_worktree))
-            emit("REQUIRED: cd {0}".format(target_worktree))
-            return 1
+    if claim.worktree:
+        worktree_path = Path(claim.worktree)
+        if not worktree_path.exists():
+            emit("WARNING: claimed worktree no longer exists at {0} — proceeding from current directory".format(claim.worktree))
+        else:
+            current_path = Path.cwd().resolve()
+            target_worktree = worktree_path.resolve()
+            if current_path != target_worktree:
+                emit("ERROR: mesh pr must be run from the claimed worktree.")
+                emit("Current: {0}".format(current_path))
+                emit("Expected: {0}".format(target_worktree))
+                emit("REQUIRED: cd {0}".format(target_worktree))
+                return 1
 
     body = render_pr_body(work_item, claim)
     emit(body)

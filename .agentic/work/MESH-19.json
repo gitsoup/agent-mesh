@@ -3,7 +3,7 @@
   "title": "mesh lane command \u2014 provision, list, and auto-name lanes at init",
   "description": "Implement the mesh lane subcommand and update mesh init to provision persistent lane worktrees. mesh init should accept --lanes N (default 1) and create N lane worktrees named {user-slug}-{n}, each checked out on a wt/{workspace_id} base branch tracking origin/main. mesh lane list shows each lane's status (idle/active), current branch, and workspace_id. mesh lane add provisions an additional lane on demand. This is the foundation for the worker pool claim model (ADR 0004).",
   "kind": "feature",
-  "status": "ready",
+  "status": "done",
   "execution": "afk_safe",
   "module": "cli",
   "acceptance_criteria": [

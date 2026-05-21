@@ -1,0 +1,30 @@
+{
+  "schema_version": "0.1",
+  "work_id": "MESH-19",
+  "status": "in_progress",
+  "claimed_by": "agent:claude:c02f80m5ml85",
+  "agent_runtime": "claude",
+  "role": "implementer",
+  "machine": "c02f80m5ml85",
+  "workspace_id": "agent-c02f80m5ml85",
+  "worktree": "/Users/karthick/projects/agent-mesh-agent-c02f80m5ml85",
+  "branch": "feat/MESH-19-mesh-lane-command",
+  "claimed_at": "2026-05-21T08:41:48Z",
+  "last_seen": "2026-05-21T09:15:00Z",
+  "evidence": [
+    {
+      "kind": "test",
+      "command": "uv run pytest -v",
+      "result": "passed",
+      "summary": "72/72 tests passing — 9 new lane tests, 63 existing tests all green",
+      "created_at": "2026-05-21T09:15:00Z"
+    }
+  ],
+  "events": [
+    {
+      "action": "claimed",
+      "at": "2026-05-21T08:41:48Z",
+      "by": "agent:claude:c02f80m5ml85"
+    }
+  ]
+}

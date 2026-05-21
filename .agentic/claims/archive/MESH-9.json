@@ -1,0 +1,23 @@
+{
+  "schema_version": "0.1",
+  "work_id": "MESH-9",
+  "status": "merged",
+  "claimed_by": "agent:claude:C02F80M5ML85",
+  "agent_runtime": "agent",
+  "role": "implementer",
+  "machine": "C02F80M5ML85",
+  "workspace_id": "agent-c02f80m5ml85",
+  "worktree": "/Users/karthick/projects/agent-mesh-agent-c02f80m5ml85",
+  "branch": "feat/MESH-9-route-coordination-commands-through-mesh-state-worktree",
+  "claimed_at": "2026-05-20T22:00:00Z",
+  "last_seen": "2026-05-21T08:15:52Z",
+  "evidence": [],
+  "events": [
+    {
+      "action": "claimed",
+      "at": "2026-05-20T22:00:00Z",
+      "by": "agent:claude:C02F80M5ML85",
+      "note": null
+    }
+  ]
+}

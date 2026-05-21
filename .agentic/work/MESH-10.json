@@ -1,0 +1,29 @@
+{
+  "schema_version": "0.1",
+  "id": "MESH-10",
+  "title": "Add locking and migration safety for shared coordination state writes",
+  "description": "Define the write-safety, locking, and migration behavior needed when multiple worktrees update shared live coordination state.",
+  "kind": "feature",
+  "status": "ready",
+  "execution": "afk_safe",
+  "module": "state",
+  "planning": {
+    "provider": "local",
+    "url": null,
+    "external_id": null
+  },
+  "prd": null,
+  "acceptance_criteria": [
+    "Define per-record locking or atomic update rules for shared live state",
+    "Add migration and validation rules for introducing mesh/state into existing repos",
+    "Document failure and recovery behavior when coordination writes conflict"
+  ],
+  "dependencies": [
+    "MESH-7",
+    "MESH-8",
+    "MESH-9"
+  ],
+  "risk": "high",
+  "created_at": "2026-05-17T17:40:00Z",
+  "updated_at": "2026-05-17T17:40:00Z"
+}

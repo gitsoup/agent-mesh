@@ -1,0 +1,41 @@
+{
+  "schema_version": "0.1",
+  "type": "implementation_review",
+  "id": "PR-MESH-19",
+  "work_id": "MESH-19",
+  "pr": {
+    "number": 12,
+    "url": "https://github.com/gitsoup/agent-mesh/pull/12",
+    "branch": "feat/MESH-19-mesh-lane-command",
+    "base": "main"
+  },
+  "author": {
+    "agent_runtime": "claude",
+    "role": "implementer"
+  },
+  "requested_role": "reviewer",
+  "context": {
+    "work_item": ".agentic/work/MESH-19.json",
+    "claim": ".agentic/claims/MESH-19.json",
+    "prd": null,
+    "context_files": [
+      ".agentic/context/adr/0004-persistent-lane-worktrees.md",
+      ".agentic/context/CONTEXT.md",
+      "agent_mesh/config.py",
+      "agent_mesh/topology.py",
+      "agent_mesh/cli.py",
+      "tests/test_lane.py"
+    ]
+  },
+  "evidence": [
+    {
+      "kind": "test",
+      "command": "uv run pytest -v",
+      "result": "passed",
+      "summary": "77/77 tests passing — 14 lane tests (5 new integration tests added in feedback round)",
+      "created_at": "2026-05-21T09:45:00Z"
+    }
+  ],
+  "status": "pending_review",
+  "created_at": "2026-05-21T09:15:00Z"
+}

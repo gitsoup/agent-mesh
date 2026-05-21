@@ -1,0 +1,65 @@
+{
+  "schema_version": "0.1",
+  "type": "review_request",
+  "id": "PR-MESH-13",
+  "work_id": "MESH-13",
+  "pr": {
+    "number": 10,
+    "url": "https://github.com/gitsoup/agent-mesh/pull/10",
+    "branch": "feat/MESH-13-auto-refresh-claim-last-seen-on-mesh-command-runs",
+    "base": "main"
+  },
+  "author": {
+    "agent_runtime": "agent",
+    "role": "implementer"
+  },
+  "requested_role": "reviewer",
+  "context": {
+    "work_item": ".agentic/work/MESH-13.json",
+    "claim": ".agentic/claims/MESH-13.json",
+    "prd": null,
+    "context_files": [
+      ".agentic/context/CONTEXT.md",
+      ".agentic/context/CONTEXT-MAP.md"
+    ]
+  },
+  "evidence": [
+    {
+      "kind": "test",
+      "command": "uv run pytest tests/test_workflow.py -q",
+      "result": "40 passed, 4 failed (pre-existing merge env failures)",
+      "summary": "All 40 applicable tests pass; 4 pre-existing failures are environmental (merge tests fail inside worktree, pass from shared root)",
+      "created_at": "2026-05-20T20:08:27Z"
+    },
+    {
+      "kind": "test",
+      "command": "test_last_seen_refreshed_when_running_from_claimed_worktree",
+      "result": "pass",
+      "summary": "last_seen updates when mesh command runs from inside the claimed worktree",
+      "created_at": "2026-05-20T20:08:27Z"
+    },
+    {
+      "kind": "test",
+      "command": "test_mesh_status_shows_active_for_current_worktree_regardless_of_elapsed_time",
+      "result": "pass",
+      "summary": "mesh status shows [active] even when last_seen is backdated past stale threshold",
+      "created_at": "2026-05-20T20:08:27Z"
+    },
+    {
+      "kind": "test",
+      "command": "test_last_seen_not_refreshed_from_outside_worktree",
+      "result": "pass",
+      "summary": "last_seen unchanged when running from shared root (not the worktree)",
+      "created_at": "2026-05-20T20:08:27Z"
+    },
+    {
+      "kind": "test",
+      "command": "test_last_seen_refresh_silent_when_claim_unwritable",
+      "result": "pass",
+      "summary": "command exits 0 with no error output when claim file is read-only",
+      "created_at": "2026-05-20T20:08:27Z"
+    }
+  ],
+  "status": "merged",
+  "created_at": "2026-05-20T20:08:27Z"
+}

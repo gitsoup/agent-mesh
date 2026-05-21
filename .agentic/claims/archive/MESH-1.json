@@ -1,0 +1,31 @@
+{
+  "schema_version": "0.1",
+  "work_id": "MESH-1",
+  "status": "active",
+  "claimed_by": "agent:claude:claude-sonnet-4-6",
+  "agent_runtime": "claude",
+  "role": "implementer",
+  "machine": "karthick-local",
+  "workspace_id": "claude-mesh1",
+  "worktree": "/private/tmp/agent-mesh-claude-mesh1",
+  "branch": "mesh1-ongoing-coordination",
+  "claimed_at": "2026-05-18T00:00:00Z",
+  "last_seen": "2026-05-18T01:00:00Z",
+  "evidence": [
+    {
+      "kind": "test",
+      "command": "uv run pytest",
+      "result": "passed",
+      "summary": "31 tests passed (16 workflow, 12 storage, 1 cli, 1 config, 1 test_cli)",
+      "created_at": "2026-05-18T00:00:00Z"
+    }
+  ],
+  "events": [
+    {
+      "action": "claimed",
+      "at": "2026-05-18T00:00:00Z",
+      "by": "agent:claude:claude-sonnet-4-6",
+      "note": null
+    }
+  ]
+}

@@ -1,0 +1,29 @@
+{
+  "id": "MESH-19",
+  "title": "mesh lane command \u2014 provision, list, and auto-name lanes at init",
+  "description": "Implement the mesh lane subcommand and update mesh init to provision persistent lane worktrees. mesh init should accept --lanes N (default 1) and create N lane worktrees named {user-slug}-{n}, each checked out on a wt/{workspace_id} base branch tracking origin/main. mesh lane list shows each lane's status (idle/active), current branch, and workspace_id. mesh lane add provisions an additional lane on demand. This is the foundation for the worker pool claim model (ADR 0004).",
+  "kind": "feature",
+  "status": "done",
+  "execution": "afk_safe",
+  "module": "cli",
+  "acceptance_criteria": [
+    "mesh init --lanes N creates N lane worktrees named {user-slug}-{n} adjacent to the shared root",
+    "Each lane is checked out on wt/{workspace_id} base branch tracking origin/main",
+    "mesh lane list shows workspace_id, status (idle/active), current branch, and worktree path for each lane",
+    "mesh lane add {name} provisions an additional lane worktree",
+    "Lane names are derived from git config user.name (slugified) + slot index",
+    "mesh doctor reports lanes whose wt/ base branch has diverged from origin/main",
+    "Tests cover: init creates N lanes, lane list shows correct status, lane add is idempotent"
+  ],
+  "dependencies": [],
+  "risk": "medium",
+  "schema_version": "0.1",
+  "planning": {
+    "provider": "local",
+    "url": null,
+    "external_id": null
+  },
+  "prd": null,
+  "created_at": "2026-05-20T19:31:44Z",
+  "updated_at": "2026-05-20T19:31:44Z"
+}

@@ -1,0 +1,25 @@
+{
+  "schema_version": "0.1",
+  "id": "MESH-5",
+  "title": "Fix concurrent work item creation race",
+  "description": "Fix concurrent work item creation race",
+  "kind": "feature",
+  "status": "ready",
+  "execution": "afk_safe",
+  "module": "state",
+  "planning": {
+    "provider": "local",
+    "url": null,
+    "external_id": null
+  },
+  "prd": null,
+  "acceptance_criteria": [
+    "Prevent duplicate work IDs under concurrent task creation",
+    "Add regression coverage for parallel or interleaved task creation",
+    "Document locking or atomic allocation behavior"
+  ],
+  "dependencies": [],
+  "risk": "medium",
+  "created_at": "2026-05-17T12:28:11Z",
+  "updated_at": "2026-05-17T12:28:11Z"
+}

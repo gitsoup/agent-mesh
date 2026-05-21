@@ -1,0 +1,44 @@
+{
+  "schema_version": "0.1",
+  "work_id": "MESH-7",
+  "status": "archived",
+  "claimed_by": "agent:codex:C02F80M5ML85",
+  "agent_runtime": "codex",
+  "role": "implementer",
+  "machine": "C02F80M5ML85",
+  "workspace_id": "codex-mesh7",
+  "worktree": "/private/tmp/agent-mesh-codex-mesh7",
+  "branch": "mesh7-topology",
+  "claimed_at": "2026-05-17T23:52:25Z",
+  "last_seen": "2026-05-18T15:58:34Z",
+  "evidence": [
+    {
+      "kind": "test",
+      "command": "uv run pytest tests/test_storage.py tests/test_workflow.py",
+      "result": "passed",
+      "summary": "20 tests passed",
+      "created_at": "2026-05-18T00:02:00Z"
+    },
+    {
+      "kind": "test",
+      "command": "uv run pytest tests/test_workflow.py",
+      "result": "passed",
+      "summary": "11 tests passed",
+      "created_at": "2026-05-18T00:21:00Z"
+    }
+  ],
+  "events": [
+    {
+      "action": "claimed",
+      "at": "2026-05-17T23:52:25Z",
+      "by": "agent:codex:C02F80M5ML85",
+      "note": null
+    },
+    {
+      "action": "merged",
+      "at": "2026-05-18T15:58:34Z",
+      "by": "agent:codex:C02F80M5ML85",
+      "note": "PR #1 merged to main"
+    }
+  ]
+}

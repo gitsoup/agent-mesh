@@ -1,0 +1,25 @@
+{
+  "schema_version": "0.1",
+  "id": "MESH-4",
+  "title": "Design brownfield adoption and migration flow",
+  "description": "Design brownfield adoption and migration flow",
+  "kind": "feature",
+  "status": "ready",
+  "execution": "afk_safe",
+  "module": "adoption",
+  "planning": {
+    "provider": "local",
+    "url": null,
+    "external_id": null
+  },
+  "prd": null,
+  "acceptance_criteria": [
+    "Define how existing docs, tasks, and conventions are discovered",
+    "Define normalization into Mesh-compatible context and work items",
+    "Identify migration commands and safety rules"
+  ],
+  "dependencies": [],
+  "risk": "medium",
+  "created_at": "2026-05-17T12:28:07Z",
+  "updated_at": "2026-05-17T12:28:07Z"
+}

@@ -1,0 +1,51 @@
+{
+  "schema_version": "0.1",
+  "type": "review_request",
+  "id": "PR-MESH-15",
+  "work_id": "MESH-15",
+  "pr": {
+    "number": 4,
+    "url": "https://github.com/gitsoup/agent-mesh/pull/4",
+    "branch": "feat/MESH-15-mesh-merge-crashes-on-dashboard-rebuild-when-called-from-task-worktree",
+    "base": "main"
+  },
+  "author": {
+    "agent_runtime": "codex",
+    "role": "implementer"
+  },
+  "requested_role": "reviewer",
+  "context": {
+    "work_item": ".agentic/work/MESH-15.json",
+    "claim": ".agentic/claims/MESH-15.json",
+    "prd": null,
+    "context_files": [
+      ".agentic/context/CONTEXT.md",
+      ".agentic/context/CONTEXT-MAP.md"
+    ]
+  },
+  "evidence": [
+    {
+      "kind": "test",
+      "command": "uv run pytest -q",
+      "result": "43 passed in 31s",
+      "summary": "All existing tests pass; new regression test added",
+      "created_at": "2026-05-18T22:50:00Z"
+    },
+    {
+      "kind": "test",
+      "command": "test_merge_from_inside_task_worktree_completes_dashboard_rebuild",
+      "result": "pass",
+      "summary": "Regression test: monkeypatch.chdir(worktree) then mesh merge \u2014 confirms no FileNotFoundError and dashboard built",
+      "created_at": "2026-05-18T22:50:00Z"
+    },
+    {
+      "kind": "review",
+      "command": "git diff main..HEAD -- agent_mesh/cli.py",
+      "result": "build_dashboard(repo_root) at both call sites",
+      "summary": "Path.cwd() not called after worktree removal in handle_merge or handle_sync",
+      "created_at": "2026-05-18T22:50:00Z"
+    }
+  ],
+  "status": "merged",
+  "created_at": "2026-05-18T22:50:53Z"
+}

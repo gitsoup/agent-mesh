@@ -67,10 +67,21 @@ def build_parser() -> argparse.ArgumentParser:
     )
     init_parser.add_argument("--worktree-root")
     init_parser.add_argument("--claim-stale-after-minutes", type=int, default=120)
+    init_parser.add_argument("--lanes", type=int, default=0, help="Number of lane worktrees to provision.")
     init_parser.set_defaults(func=handle_init)
 
     doctor_parser = subparsers.add_parser("doctor", help="Validate Agent Mesh config and state.")
     doctor_parser.set_defaults(func=handle_doctor)
+
+    lane_parser = subparsers.add_parser("lane", help="Lane management commands.")
+    lane_subparsers = lane_parser.add_subparsers(dest="lane_command")
+
+    lane_list_parser = lane_subparsers.add_parser("list", help="List provisioned lanes.")
+    lane_list_parser.set_defaults(func=handle_lane_list)
+
+    lane_add_parser = lane_subparsers.add_parser("add", help="Provision a new lane.")
+    lane_add_parser.add_argument("name", nargs="?", default=None, help="Lane name (auto-generated if omitted).")
+    lane_add_parser.set_defaults(func=handle_lane_add)
 
     status_parser = subparsers.add_parser("status", help="Summarize local Agent Mesh state.")
     status_parser.add_argument("--skip-dashboard-rebuild", action="store_true")
@@ -199,6 +210,15 @@ def handle_init(args: argparse.Namespace) -> int:
     project_key = args.project_key or derive_project_key(project_name)
     adapters = parse_csv(args.adapters)
 
+    # Stash existing lanes before init_repo rewrites project.json
+    _existing_project = repo_root / ".agentic/project.json"
+    existing_lanes = []
+    if _existing_project.exists():
+        try:
+            existing_lanes = list(load_project_config(repo_root).coordination.lanes)
+        except Exception:
+            pass
+
     # Set up coordination worktree first so scaffold can write .agentic/ there
     coordination_root = None
     if args.worktree_policy != "off" and git_head_available(repo_root):
@@ -238,7 +258,46 @@ def handle_init(args: argparse.Namespace) -> int:
     emit("Skipped {0} existing files.".format(len(result.skipped)))
     if coordination_root is not None and coordination_root != repo_root:
         _commit_coordination_scaffold(coordination_root)
+    # Restore lanes that existed before init_repo rewrote project.json, then add new ones
+    if existing_lanes or args.lanes > 0:
+        from agent_mesh.config import save_project_config
+        cfg = load_project_config(repo_root)
+        cfg.coordination.lanes = existing_lanes
+        save_project_config(repo_root, cfg)
+    if args.lanes > 0:
+        _provision_lanes(repo_root, args.lanes, args.worktree_policy)
     return 0
+
+
+def _provision_lanes(repo_root: Path, target_count: int, worktree_policy: str) -> None:
+    from agent_mesh.config import LaneEntry, load_project_config, save_project_config
+    from agent_mesh.topology import (
+        get_user_slug, lane_name_conflicts, next_lane_name,
+        provision_lane, resolve_lane_worktree_path,
+    )
+
+    config = load_project_config(repo_root)
+    existing_count = len(config.coordination.lanes)
+    to_add = target_count - existing_count
+    if to_add <= 0:
+        emit("Lanes: {0} already provisioned, nothing to add.".format(existing_count))
+        return
+
+    user_slug = get_user_slug(repo_root)
+    for _ in range(to_add):
+        existing_names = {lane.name for lane in config.coordination.lanes}
+        workspace_id = next_lane_name(existing_names, user_slug)
+        if worktree_policy != "off" and git_head_available(repo_root):
+            try:
+                path = provision_lane(repo_root, config, workspace_id)
+            except RuntimeError as error:
+                emit("WARN: lane {0}: {1}".format(workspace_id, error))
+                path = resolve_lane_worktree_path(repo_root, workspace_id, config.coordination.worktree_root)
+        else:
+            path = resolve_lane_worktree_path(repo_root, workspace_id, config.coordination.worktree_root)
+        config.coordination.lanes.append(LaneEntry(name=workspace_id, workspace_id=workspace_id, worktree_path=str(path)))
+        emit("Lane: {0} @ {1}".format(workspace_id, path))
+    save_project_config(repo_root, config)
 
 
 def _bootstrap_project_json(
@@ -312,17 +371,89 @@ def _commit_coordination_scaffold(coordination_root: Path) -> None:
 
 
 def handle_doctor(_: argparse.Namespace) -> int:
+    from agent_mesh.config import load_project_config
     from agent_mesh.state.storage import resolve_coordination_root, resolve_repo_root
     from agent_mesh.state.validate import validate_state_tree
+    from agent_mesh.topology import lane_base_branch_diverged
 
     repo_root = resolve_repo_root(Path.cwd())
     coordination_root = resolve_coordination_root(repo_root)
     errors = validate_state_tree(repo_root, coordination_root)
+
+    config = load_project_config(repo_root)
+    for lane in config.coordination.lanes:
+        if lane_base_branch_diverged(repo_root, lane, config.default_branch):
+            errors.append(
+                "lane '{0}': wt/{1} has diverged from origin/{2}; run mesh sync to reset".format(
+                    lane.name, lane.workspace_id, config.default_branch
+                )
+            )
+
     if errors:
         for error in errors:
             emit("ERROR: {0}".format(error))
         return 1
     emit("OK: Agent Mesh state is valid.")
+    return 0
+
+
+def handle_lane_list(_: argparse.Namespace) -> int:
+    from agent_mesh.config import load_project_config
+    from agent_mesh.state.storage import resolve_repo_root
+    from agent_mesh.topology import inspect_lane_status
+
+    repo_root = resolve_repo_root(Path.cwd())
+    config = load_project_config(repo_root)
+    lanes = config.coordination.lanes
+    if not lanes:
+        emit("No lanes provisioned. Run: mesh init --lanes N")
+        return 0
+    emit("workspace_id\tstatus\tbranch\tworktree_path")
+    for lane in lanes:
+        status = inspect_lane_status(lane)
+        emit("{0}\t{1}\t{2}\t{3}".format(
+            status.workspace_id,
+            status.status,
+            status.current_branch or status.base_branch,
+            status.worktree_path,
+        ))
+    return 0
+
+
+def handle_lane_add(args: argparse.Namespace) -> int:
+    from agent_mesh.config import LaneEntry, load_project_config, save_project_config
+    from agent_mesh.state.storage import resolve_repo_root
+    from agent_mesh.topology import (
+        get_user_slug, lane_name_conflicts, next_lane_name,
+        provision_lane, resolve_lane_worktree_path,
+    )
+
+    repo_root = resolve_repo_root(Path.cwd())
+    config = load_project_config(repo_root)
+
+    if args.name:
+        name = args.name
+        conflict = lane_name_conflicts(repo_root, config, name)
+        if conflict:
+            emit("ERROR: {0}".format(conflict))
+            return 1
+    else:
+        user_slug = get_user_slug(repo_root)
+        existing_names = {lane.name for lane in config.coordination.lanes}
+        name = next_lane_name(existing_names, user_slug)
+
+    if config.coordination.worktree_policy != "off" and git_head_available(repo_root):
+        try:
+            path = provision_lane(repo_root, config, name)
+        except RuntimeError as error:
+            emit("ERROR: {0}".format(error))
+            return 1
+    else:
+        path = resolve_lane_worktree_path(repo_root, name, config.coordination.worktree_root)
+
+    config.coordination.lanes.append(LaneEntry(name=name, workspace_id=name, worktree_path=str(path)))
+    save_project_config(repo_root, config)
+    emit("Lane: {0} @ {1}".format(name, path))
     return 0
 
 

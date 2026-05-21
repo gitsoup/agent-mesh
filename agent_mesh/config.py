@@ -16,6 +16,12 @@ class PlanningConfig(BaseModel):
     external_project: Optional[str] = None
 
 
+class LaneEntry(BaseModel):
+    name: str
+    workspace_id: str
+    worktree_path: str
+
+
 class CoordinationConfig(BaseModel):
     strategy: str = "git_files"
     branch: str = "mesh/state"
@@ -27,6 +33,7 @@ class CoordinationConfig(BaseModel):
     worktree_root: Optional[str] = None
     coordination_worktree: Optional[str] = None
     claim_stale_after_minutes: int = 120
+    lanes: list[LaneEntry] = Field(default_factory=list)
 
 
 class RunnerConfig(BaseModel):
@@ -59,3 +66,8 @@ def load_project_config(repo_root: Path) -> ProjectConfig:
     path = repo_root / PROJECT_FILE
     data = json.loads(path.read_text(encoding="utf-8"))
     return ProjectConfig.model_validate(data)
+
+
+def save_project_config(repo_root: Path, config: ProjectConfig) -> None:
+    from agent_mesh.state.storage import atomic_write_json
+    atomic_write_json(repo_root / PROJECT_FILE, json.loads(config.to_json()))

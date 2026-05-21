@@ -1,11 +1,18 @@
 {
+  "schema_version": "0.1",
   "id": "MESH-21",
   "title": "Update mesh merge to return lane to idle instead of removing worktree",
   "description": "Change mesh merge to return the lane worktree to idle state after merge, instead of running git worktree remove. After the PR is merged: checkout wt/{workspace_id} in the lane worktree, reset --hard to origin/main, delete the local task branch, and record the lane as idle in coordination state. The worktree directory survives and is immediately available for the next task. Removes the git worktree remove and branch-delete-before-worktree-remove sequencing that caused MESH-15.",
   "kind": "feature",
-  "status": "ready",
+  "status": "in_progress",
   "execution": "afk_safe",
   "module": "cli",
+  "planning": {
+    "provider": "local",
+    "url": null,
+    "external_id": null
+  },
+  "prd": null,
   "acceptance_criteria": [
     "After mesh merge, the lane worktree is checked out on wt/{workspace_id} and synced to origin/main",
     "The task branch is deleted locally and remotely after merge",
@@ -19,13 +26,6 @@
     "MESH-20"
   ],
   "risk": "medium",
-  "schema_version": "0.1",
-  "planning": {
-    "provider": "local",
-    "url": null,
-    "external_id": null
-  },
-  "prd": null,
   "created_at": "2026-05-20T19:31:44Z",
-  "updated_at": "2026-05-20T19:31:44Z"
+  "updated_at": "2026-05-21T22:36:03Z"
 }

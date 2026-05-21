@@ -1,0 +1,23 @@
+{
+  "schema_version": "0.1",
+  "work_id": "MESH-21",
+  "status": "in_progress",
+  "claimed_by": "agent:codex:C02F80M5ML85",
+  "agent_runtime": "codex",
+  "role": "implementer",
+  "machine": "C02F80M5ML85",
+  "workspace_id": "gitsoup-1",
+  "worktree": "/Users/karthick/projects/agent-mesh-gitsoup-1",
+  "branch": "feat/MESH-21-update-mesh-merge-to-return-lane-to-idle-instead-of-removing-worktree",
+  "claimed_at": "2026-05-21T22:36:03Z",
+  "last_seen": "2026-05-21T22:36:03Z",
+  "evidence": [],
+  "events": [
+    {
+      "action": "claimed",
+      "at": "2026-05-21T22:36:03Z",
+      "by": "agent:codex:C02F80M5ML85",
+      "note": null
+    }
+  ]
+}

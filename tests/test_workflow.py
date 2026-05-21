@@ -1167,6 +1167,48 @@ def test_merge_returns_exit_2_on_warnings(tmp_path: Path, monkeypatch, capsys) -
     assert "WARNING" in output
 
 
+def test_merge_reconciles_review_packet_with_nonstandard_filename(tmp_path: Path, monkeypatch, capsys) -> None:
+    repo_root = init_repo(tmp_path, monkeypatch, capsys)
+    run_cli(["task", "add", "Implement auth endpoint", "--module", "api"], capsys)
+    run_cli(["claim", "APP-1", "--agent", "codex", "--role", "implementer", "--no-push"], capsys)
+    run_cli(["pr", "--dry-run", "--work-id", "APP-1"], capsys)
+
+    review_path = repo_root / ".agentic/reviews/PR-APP-1.json"
+    renamed_path = repo_root / ".agentic/reviews/review-request-app-1.json"
+    review_path.rename(renamed_path)
+
+    exit_code, output = run_cli(["merge", "APP-1", "--no-push", "--skip-merge-check"], capsys)
+
+    assert exit_code == 0
+    assert "Marked review packet merged: PR-APP-1" in output
+    review = json.loads(renamed_path.read_text(encoding="utf-8"))
+    assert review["status"] == "merged"
+
+
+def test_sync_reconciles_pending_review_for_completed_work(tmp_path: Path, monkeypatch, capsys) -> None:
+    repo_root = init_repo(tmp_path, monkeypatch, capsys)
+    run_cli(["task", "add", "Implement auth endpoint", "--module", "api"], capsys)
+    run_cli(["claim", "APP-1", "--agent", "codex", "--role", "implementer", "--no-push"], capsys)
+    run_cli(["pr", "--dry-run", "--work-id", "APP-1"], capsys)
+
+    work_path = repo_root / ".agentic/work/APP-1.json"
+    work_item = json.loads(work_path.read_text(encoding="utf-8"))
+    work_item["status"] = "done"
+    work_path.write_text(json.dumps(work_item, indent=2) + "\n", encoding="utf-8")
+
+    claim_path = repo_root / ".agentic/claims/APP-1.json"
+    archive_path = repo_root / ".agentic/claims/archive/APP-1.json"
+    archive_path.parent.mkdir(parents=True, exist_ok=True)
+    claim_path.rename(archive_path)
+
+    exit_code, output = run_cli(["sync"], capsys)
+
+    assert exit_code == 0
+    assert "Reconciled review packet to merged: PR-APP-1" in output
+    review = json.loads((repo_root / ".agentic/reviews/PR-APP-1.json").read_text(encoding="utf-8"))
+    assert review["status"] == "merged"
+
+
 def test_merge_blocks_on_coordination_worktree(tmp_path: Path, monkeypatch, capsys) -> None:
     repo_root = tmp_path / "demo-repo"
     repo_root.mkdir(parents=True)

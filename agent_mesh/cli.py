@@ -853,7 +853,7 @@ def handle_merge(args: argparse.Namespace) -> int:
     import shutil
 
     from agent_mesh.config import load_project_config
-    from agent_mesh.state.models import Claim, WorkItem
+    from agent_mesh.state.models import Claim, ReviewPacket, WorkItem
     from agent_mesh.state.storage import load_model, resolve_coordination_root, resolve_repo_root, save_model_json
     from agent_mesh.topology import resolve_coordination_worktree_path
 
@@ -941,13 +941,12 @@ def handle_merge(args: argparse.Namespace) -> int:
             warnings_fired = True
 
     # Update review packet status to merged if one exists
-    review_packet_path = coordination_root / ".agentic/reviews" / "PR-{0}.json".format(args.work_id)
-    if review_packet_path.exists():
-        from agent_mesh.state.models import ReviewPacket
+    review_packet_path = resolve_review_packet_path(coordination_root, args.work_id)
+    if review_packet_path is not None:
         review = load_model(review_packet_path, ReviewPacket)
         review.status = "merged"
         save_model_json(review_packet_path, review)
-        emit("Marked review packet merged: PR-{0}".format(args.work_id))
+        emit("Marked review packet merged: {0}".format(review.id))
     else:
         emit("WARNING: no review packet found for {0} — dashboard may show stale review state".format(args.work_id))
         warnings_fired = True
@@ -970,6 +969,23 @@ def handle_merge(args: argparse.Namespace) -> int:
     except FileNotFoundError:
         emit("WARNING: claim file already moved by a concurrent process — skipping archive")
         warnings_fired = True
+
+    repaired_reviews = reconcile_completed_review_packets(coordination_root, args.work_id)
+    if review_packet_path is None and repaired_reviews:
+        for review_id in repaired_reviews:
+            emit("Reconciled review packet to merged: {0}".format(review_id))
+
+    active_claim_exists = (coordination_root / ".agentic/claims" / "{0}.json".format(args.work_id)).exists()
+    if active_claim_exists:
+        emit("WARNING: active claim still present for {0} after merge".format(args.work_id))
+        warnings_fired = True
+
+    review_packet_path = resolve_review_packet_path(coordination_root, args.work_id)
+    if review_packet_path is not None:
+        review = load_model(review_packet_path, ReviewPacket)
+        if review.status != "merged":
+            emit("WARNING: review packet still pending after merge: {0}".format(review.id))
+            warnings_fired = True
 
     if config.dashboard.enabled and not warnings_fired:
         build_dashboard(repo_root, coordination_root)
@@ -1002,6 +1018,11 @@ def handle_sync(_: argparse.Namespace) -> int:
         except RuntimeError as error:
             emit("ERROR: {0}".format(error))
             return 1
+
+    repaired_reviews = reconcile_completed_review_packets(coordination_root)
+    for review_id in repaired_reviews:
+        emit("Reconciled review packet to merged: {0}".format(review_id))
+
     if config.dashboard.enabled:
         build_dashboard(repo_root, coordination_root)
     return handle_doctor(argparse.Namespace())
@@ -1029,7 +1050,63 @@ def resolve_review_packet_path(coordination_root: Path, target: str) -> Optional
     for candidate in candidates:
         if candidate.exists():
             return candidate
+    from agent_mesh.state.models import ReviewPacket
+    from agent_mesh.state.storage import iter_json_files, load_model
+
+    reviews_dir = coordination_root / ".agentic/reviews"
+    aliases = {target, "PR-{0}".format(target)}
+    for candidate in iter_json_files(reviews_dir):
+        try:
+            review = load_model(candidate, ReviewPacket)
+        except Exception:
+            continue
+        if review.id in aliases or review.work_id == target:
+            return candidate
     return None
+
+
+def reconcile_completed_review_packets(coordination_root: Path, work_id: Optional[str] = None) -> list[str]:
+    from agent_mesh.state.models import ReviewPacket, WorkItem
+    from agent_mesh.state.storage import iter_json_files, load_model, save_model_json
+
+    work_items_dir = coordination_root / ".agentic/work"
+    reviews_dir = coordination_root / ".agentic/reviews"
+    if not reviews_dir.exists() or not work_items_dir.exists():
+        return []
+
+    work_items = {}
+    for path in iter_json_files(work_items_dir):
+        try:
+            item = load_model(path, WorkItem)
+        except Exception:
+            continue
+        work_items[item.id] = item
+
+    repaired: list[str] = []
+    for path in iter_json_files(reviews_dir):
+        try:
+            review = load_model(path, ReviewPacket)
+        except Exception:
+            continue
+        if work_id is not None and review.work_id != work_id:
+            continue
+        if review.status == "merged":
+            continue
+
+        work_item = work_items.get(review.work_id)
+        if work_item is None or work_item.status != "done":
+            continue
+
+        active_claim_path = coordination_root / review.context.claim
+        archived_claim_path = coordination_root / ".agentic/claims/archive" / "{0}.json".format(review.work_id)
+        if active_claim_path.exists() and not archived_claim_path.exists():
+            continue
+
+        review.status = "merged"
+        save_model_json(path, review)
+        repaired.append(review.id)
+
+    return repaired
 
 
 def parse_utc(raw: str) -> datetime:

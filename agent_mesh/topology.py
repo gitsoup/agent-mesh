@@ -6,8 +6,9 @@ import os
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Optional
 
-from agent_mesh.config import ProjectConfig
+from agent_mesh.config import LaneEntry, ProjectConfig
 
 
 @dataclass(frozen=True)
@@ -291,3 +292,139 @@ def branch_exists(repo_root: Path, branch: str) -> bool:
         text=True,
     )
     return result.returncode == 0
+
+
+# ---------------------------------------------------------------------------
+# Lane topology helpers (ADR 0004)
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class LaneStatus:
+    name: str
+    workspace_id: str
+    worktree_path: Path
+    base_branch: str
+    status: str  # idle | active | missing
+    current_branch: Optional[str] = None
+    detail: Optional[str] = None
+
+
+def get_user_slug(repo_root: Path) -> str:
+    from agent_mesh.utils.slug import slugify
+    result = subprocess.run(
+        ["git", "config", "user.name"],
+        cwd=repo_root, check=False, capture_output=True, text=True,
+    )
+    if result.returncode == 0 and result.stdout.strip():
+        return slugify(result.stdout.strip()) or "mesh"
+    return "mesh"
+
+
+def next_lane_name(existing_names: set, user_slug: str, max_slots: int = 1000) -> str:
+    for n in range(1, max_slots + 1):
+        candidate = "{0}-{1}".format(user_slug, n)
+        if candidate not in existing_names:
+            return candidate
+    raise RuntimeError("no free lane slot found under slug '{0}' (checked 1–{1})".format(user_slug, max_slots))
+
+
+def resolve_lane_worktree_path(repo_root: Path, workspace_id: str, worktree_root: Optional[str]) -> Path:
+    if worktree_root:
+        root = Path(worktree_root).expanduser()
+        root = (repo_root / root).resolve() if not root.is_absolute() else root.resolve()
+        return root / "{0}-{1}".format(repo_root.name, workspace_id)
+    return repo_root.parent / "{0}-{1}".format(repo_root.name, workspace_id)
+
+
+def inspect_lane_status(lane: LaneEntry) -> LaneStatus:
+    path = Path(lane.worktree_path)
+    base_branch = "wt/{0}".format(lane.workspace_id)
+
+    if not path.exists() or not (path / ".git").exists():
+        return LaneStatus(
+            name=lane.name,
+            workspace_id=lane.workspace_id,
+            worktree_path=path,
+            base_branch=base_branch,
+            status="missing",
+        )
+
+    current = run_git_text(path, ["branch", "--show-current"])
+    if current is None:
+        return LaneStatus(
+            name=lane.name,
+            workspace_id=lane.workspace_id,
+            worktree_path=path,
+            base_branch=base_branch,
+            status="missing",
+            detail="failed to read branch",
+        )
+    current = current.strip()
+    status = "idle" if current == base_branch else "active"
+    return LaneStatus(
+        name=lane.name,
+        workspace_id=lane.workspace_id,
+        worktree_path=path,
+        base_branch=base_branch,
+        status=status,
+        current_branch=current or None,
+    )
+
+
+def lane_base_branch_diverged(repo_root: Path, lane: LaneEntry, default_branch: str) -> bool:
+    base_branch = "wt/{0}".format(lane.workspace_id)
+    if not branch_exists(repo_root, base_branch):
+        return False
+    # Count commits on origin/main that are NOT yet on wt/X — i.e., the lane is behind.
+    result = run_git_text(
+        repo_root,
+        ["rev-list", "--count", "{0}..origin/{1}".format(base_branch, default_branch)],
+    )
+    if result is None:
+        return False
+    try:
+        return int(result.strip()) > 0
+    except ValueError:
+        return False
+
+
+def lane_name_conflicts(repo_root: Path, config: ProjectConfig, name: str) -> Optional[str]:
+    existing_names = {lane.name for lane in config.coordination.lanes}
+    if name in existing_names:
+        return "lane '{0}' already registered".format(name)
+    if branch_exists(repo_root, "wt/{0}".format(name)):
+        return "branch 'wt/{0}' already exists".format(name)
+    path = resolve_lane_worktree_path(repo_root, name, config.coordination.worktree_root)
+    if path.exists():
+        return "worktree path '{0}' already exists".format(path)
+    return None
+
+
+def provision_lane(repo_root: Path, config: ProjectConfig, workspace_id: str) -> Path:
+    path = resolve_lane_worktree_path(repo_root, workspace_id, config.coordination.worktree_root)
+    base_branch = "wt/{0}".format(workspace_id)
+
+    if path.exists() and (path / ".git").exists():
+        return path
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    if branch_exists(repo_root, base_branch):
+        args = ["worktree", "add", str(path), base_branch]
+    else:
+        args = ["worktree", "add", "-b", base_branch, str(path), config.default_branch]
+
+    result = subprocess.run(
+        ["git", *args], cwd=repo_root, check=False, capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout).strip()
+        raise RuntimeError("failed to provision lane: {0}".format(detail))
+
+    # Set upstream tracking so git status / pull know to sync against origin/main.
+    # Best-effort: fails silently when the repo has no remote (local-only repos).
+    subprocess.run(
+        ["git", "branch", "--set-upstream-to=origin/{0}".format(config.default_branch), base_branch],
+        cwd=repo_root, check=False, capture_output=True, text=True,
+    )
+    return path

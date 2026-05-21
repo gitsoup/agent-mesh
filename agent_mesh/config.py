@@ -70,4 +70,4 @@ def load_project_config(repo_root: Path) -> ProjectConfig:
 
 def save_project_config(repo_root: Path, config: ProjectConfig) -> None:
     from agent_mesh.state.storage import atomic_write_json
-    atomic_write_json(repo_root / PROJECT_FILE, json.loads(config.to_json()))
+    atomic_write_json(repo_root / PROJECT_FILE, config.model_dump())

@@ -320,13 +320,12 @@ def get_user_slug(repo_root: Path) -> str:
     return "mesh"
 
 
-def next_lane_name(existing_names: set, user_slug: str) -> str:
-    n = 1
-    while True:
+def next_lane_name(existing_names: set, user_slug: str, max_slots: int = 1000) -> str:
+    for n in range(1, max_slots + 1):
         candidate = "{0}-{1}".format(user_slug, n)
         if candidate not in existing_names:
             return candidate
-        n += 1
+    raise RuntimeError("no free lane slot found under slug '{0}' (checked 1–{1})".format(user_slug, max_slots))
 
 
 def resolve_lane_worktree_path(repo_root: Path, workspace_id: str, worktree_root: Optional[str]) -> Path:
@@ -376,9 +375,10 @@ def lane_base_branch_diverged(repo_root: Path, lane: LaneEntry, default_branch: 
     base_branch = "wt/{0}".format(lane.workspace_id)
     if not branch_exists(repo_root, base_branch):
         return False
+    # Count commits on origin/main that are NOT yet on wt/X — i.e., the lane is behind.
     result = run_git_text(
         repo_root,
-        ["rev-list", "--count", "origin/{0}..{1}".format(default_branch, base_branch)],
+        ["rev-list", "--count", "{0}..origin/{1}".format(base_branch, default_branch)],
     )
     if result is None:
         return False
@@ -420,4 +420,11 @@ def provision_lane(repo_root: Path, config: ProjectConfig, workspace_id: str) ->
     if result.returncode != 0:
         detail = (result.stderr or result.stdout).strip()
         raise RuntimeError("failed to provision lane: {0}".format(detail))
+
+    # Set upstream tracking so git status / pull know to sync against origin/main.
+    # Best-effort: fails silently when the repo has no remote (local-only repos).
+    subprocess.run(
+        ["git", "branch", "--set-upstream-to=origin/{0}".format(config.default_branch), base_branch],
+        cwd=repo_root, check=False, capture_output=True, text=True,
+    )
     return path

@@ -216,8 +216,8 @@ def handle_init(args: argparse.Namespace) -> int:
     if _existing_project.exists():
         try:
             existing_lanes = list(load_project_config(repo_root).coordination.lanes)
-        except Exception:
-            pass
+        except Exception as err:
+            emit("WARN: could not read existing lanes from project.json: {0}".format(err))
 
     # Set up coordination worktree first so scaffold can write .agentic/ there
     coordination_root = None
@@ -258,29 +258,29 @@ def handle_init(args: argparse.Namespace) -> int:
     emit("Skipped {0} existing files.".format(len(result.skipped)))
     if coordination_root is not None and coordination_root != repo_root:
         _commit_coordination_scaffold(coordination_root)
-    # Restore lanes that existed before init_repo rewrote project.json, then add new ones
+    # Restore pre-existing lanes and add new ones in a single write cycle.
     if existing_lanes or args.lanes > 0:
-        from agent_mesh.config import save_project_config
-        cfg = load_project_config(repo_root)
-        cfg.coordination.lanes = existing_lanes
-        save_project_config(repo_root, cfg)
-    if args.lanes > 0:
-        _provision_lanes(repo_root, args.lanes, args.worktree_policy)
+        _provision_lanes(repo_root, args.lanes, args.worktree_policy, existing_lanes)
     return 0
 
 
-def _provision_lanes(repo_root: Path, target_count: int, worktree_policy: str) -> None:
+def _provision_lanes(repo_root: Path, target_count: int, worktree_policy: str, pre_existing: list | None = None) -> None:
     from agent_mesh.config import LaneEntry, load_project_config, save_project_config
     from agent_mesh.topology import (
-        get_user_slug, lane_name_conflicts, next_lane_name,
+        get_user_slug, next_lane_name,
         provision_lane, resolve_lane_worktree_path,
     )
 
     config = load_project_config(repo_root)
-    existing_count = len(config.coordination.lanes)
-    to_add = target_count - existing_count
+    # Restore lanes stashed before init_repo rewrote project.json
+    if pre_existing is not None:
+        config.coordination.lanes = list(pre_existing)
+
+    to_add = target_count - len(config.coordination.lanes)
     if to_add <= 0:
-        emit("Lanes: {0} already provisioned, nothing to add.".format(existing_count))
+        if target_count > 0:
+            emit("Lanes: {0} already provisioned, nothing to add.".format(len(config.coordination.lanes)))
+        save_project_config(repo_root, config)
         return
 
     user_slug = get_user_slug(repo_root)
@@ -291,8 +291,8 @@ def _provision_lanes(repo_root: Path, target_count: int, worktree_policy: str) -
             try:
                 path = provision_lane(repo_root, config, workspace_id)
             except RuntimeError as error:
-                emit("WARN: lane {0}: {1}".format(workspace_id, error))
-                path = resolve_lane_worktree_path(repo_root, workspace_id, config.coordination.worktree_root)
+                emit("WARN: lane {0} could not be provisioned: {1}".format(workspace_id, error))
+                continue  # skip registration — don't pollute the lane registry with failed lanes
         else:
             path = resolve_lane_worktree_path(repo_root, workspace_id, config.coordination.worktree_root)
         config.coordination.lanes.append(LaneEntry(name=workspace_id, workspace_id=workspace_id, worktree_path=str(path)))

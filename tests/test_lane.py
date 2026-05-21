@@ -1,6 +1,7 @@
 """Tests for mesh lane command and mesh init --lanes."""
 
 import json
+import subprocess
 from pathlib import Path
 
 from agent_mesh.cli import app
@@ -138,3 +139,150 @@ def test_lane_add_is_idempotent_across_calls(tmp_path, monkeypatch, capsys):
     assert "lane-a" in names
     assert "lane-b" in names
     assert len(names) == 2
+
+
+# ---------------------------------------------------------------------------
+# Integration tests — require real git repo
+# ---------------------------------------------------------------------------
+
+def _init_real_git_repo(tmp_path, monkeypatch, capsys):
+    repo_root = tmp_path / "demo-repo"
+    repo_root.mkdir(parents=True)
+    subprocess.run(["git", "init", "-b", "main"], cwd=repo_root, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.email", "mesh@test.com"], cwd=repo_root, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.name", "Agent Mesh Tests"], cwd=repo_root, check=True, capture_output=True)
+    (repo_root / "README.md").write_text("demo\n", encoding="utf-8")
+    subprocess.run(["git", "add", "README.md"], cwd=repo_root, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "initial"], cwd=repo_root, check=True, capture_output=True)
+    monkeypatch.chdir(repo_root)
+    exit_code, output = run_cli(
+        ["init", "--project-name", "demo", "--project-key", "APP",
+         "--worktree-policy", "required", "--yes"],
+        capsys,
+    )
+    assert exit_code == 0, output
+    return repo_root
+
+
+def test_init_with_lanes_creates_actual_worktrees(tmp_path, monkeypatch, capsys):
+    repo_root = _init_real_git_repo(tmp_path, monkeypatch, capsys)
+
+    exit_code, output = run_cli(["init", "--project-name", "demo", "--project-key", "APP",
+                                  "--worktree-policy", "required", "--yes", "--lanes", "2"], capsys)
+    assert exit_code == 0
+
+    config = load_config(repo_root)
+    lanes = config["coordination"]["lanes"]
+    assert len(lanes) == 2
+    for lane in lanes:
+        path = Path(lane["worktree_path"])
+        assert path.exists(), "lane worktree not created: {0}".format(path)
+        assert (path / ".git").exists()
+
+    # Each lane branch should exist
+    result = subprocess.run(["git", "branch"], cwd=repo_root, capture_output=True, text=True)
+    for lane in lanes:
+        assert "wt/{0}".format(lane["workspace_id"]) in result.stdout
+
+
+def test_lane_add_with_worktree_policy_creates_worktree(tmp_path, monkeypatch, capsys):
+    repo_root = _init_real_git_repo(tmp_path, monkeypatch, capsys)
+
+    exit_code, output = run_cli(["lane", "add", "my-lane"], capsys)
+    assert exit_code == 0
+
+    config = load_config(repo_root)
+    lane = next(l for l in config["coordination"]["lanes"] if l["name"] == "my-lane")
+    path = Path(lane["worktree_path"])
+    assert path.exists()
+    assert (path / ".git").exists()
+
+    # Branch should exist
+    result = subprocess.run(["git", "branch"], cwd=repo_root, capture_output=True, text=True)
+    assert "wt/my-lane" in result.stdout
+
+
+def test_provision_lane_failure_not_registered(tmp_path, monkeypatch, capsys):
+    """A lane that fails to provision must not appear in the registry."""
+    repo_root = _init_real_git_repo(tmp_path, monkeypatch, capsys)
+    config = load_config(repo_root)
+
+    # Manually create a directory at the expected lane path to force git worktree add to fail
+    from agent_mesh.config import LaneEntry, load_project_config
+    from agent_mesh.topology import resolve_lane_worktree_path
+    proj_cfg = load_project_config(repo_root)
+    blocking_path = resolve_lane_worktree_path(repo_root, "agent-mesh-tests-1", proj_cfg.coordination.worktree_root)
+    blocking_path.mkdir(parents=True)
+    (blocking_path / "blocker.txt").write_text("blocking\n")
+
+    exit_code, output = run_cli(
+        ["init", "--project-name", "demo", "--project-key", "APP",
+         "--worktree-policy", "required", "--yes", "--lanes", "1"],
+        capsys,
+    )
+    # init succeeds (WARN emitted) but failed lane is NOT in registry
+    assert exit_code == 0
+    assert "WARN" in output
+    config = load_config(repo_root)
+    assert len(config["coordination"]["lanes"]) == 0
+
+
+def test_lane_base_branch_diverged_detects_stale_lane(tmp_path):
+    """lane_base_branch_diverged returns True when origin/main has commits the lane branch lacks."""
+    repo_root = tmp_path / "demo-repo"
+    repo_root.mkdir()
+    subprocess.run(["git", "init", "-b", "main"], cwd=repo_root, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.email", "t@t.com"], cwd=repo_root, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.name", "T"], cwd=repo_root, check=True, capture_output=True)
+    (repo_root / "a.txt").write_text("a\n")
+    subprocess.run(["git", "add", "."], cwd=repo_root, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "c1"], cwd=repo_root, check=True, capture_output=True)
+
+    # Create the lane branch at this commit
+    subprocess.run(["git", "branch", "wt/test-lane"], cwd=repo_root, check=True, capture_output=True)
+
+    # Advance main by one commit
+    (repo_root / "b.txt").write_text("b\n")
+    subprocess.run(["git", "add", "."], cwd=repo_root, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "c2"], cwd=repo_root, check=True, capture_output=True)
+
+    # Simulate origin/main pointing to the new commit via a remote-tracking ref
+    new_sha = subprocess.run(
+        ["git", "rev-parse", "main"], cwd=repo_root, capture_output=True, text=True
+    ).stdout.strip()
+    subprocess.run(
+        ["git", "update-ref", "refs/remotes/origin/main", new_sha],
+        cwd=repo_root, check=True, capture_output=True,
+    )
+
+    from agent_mesh.config import LaneEntry
+    from agent_mesh.topology import lane_base_branch_diverged
+    lane = LaneEntry(name="test-lane", workspace_id="test-lane", worktree_path=str(tmp_path / "lane"))
+    assert lane_base_branch_diverged(repo_root, lane, "main") is True
+
+
+def test_lane_base_branch_diverged_returns_false_when_synced(tmp_path):
+    """lane_base_branch_diverged returns False when the lane branch is up-to-date."""
+    repo_root = tmp_path / "demo-repo"
+    repo_root.mkdir()
+    subprocess.run(["git", "init", "-b", "main"], cwd=repo_root, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.email", "t@t.com"], cwd=repo_root, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.name", "T"], cwd=repo_root, check=True, capture_output=True)
+    (repo_root / "a.txt").write_text("a\n")
+    subprocess.run(["git", "add", "."], cwd=repo_root, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "c1"], cwd=repo_root, check=True, capture_output=True)
+
+    sha = subprocess.run(
+        ["git", "rev-parse", "main"], cwd=repo_root, capture_output=True, text=True
+    ).stdout.strip()
+    subprocess.run(["git", "branch", "wt/test-lane"], cwd=repo_root, check=True, capture_output=True)
+    # origin/main at the same commit as the lane branch
+    subprocess.run(
+        ["git", "update-ref", "refs/remotes/origin/main", sha],
+        cwd=repo_root, check=True, capture_output=True,
+    )
+
+    from agent_mesh.config import LaneEntry
+    from agent_mesh.topology import lane_base_branch_diverged
+    lane = LaneEntry(name="test-lane", workspace_id="test-lane", worktree_path=str(tmp_path / "lane"))
+    assert lane_base_branch_diverged(repo_root, lane, "main") is False

@@ -1,0 +1,38 @@
+{
+  "schema_version": "0.1",
+  "work_id": "MESH-20",
+  "status": "in_progress",
+  "claimed_by": "agent:agent:C02F80M5ML85",
+  "agent_runtime": "agent",
+  "role": "implementer",
+  "machine": "C02F80M5ML85",
+  "workspace_id": "agent-c02f80m5ml85",
+  "worktree": "/Users/karthick/projects/agent-mesh-agent-c02f80m5ml85",
+  "branch": "feat/MESH-20-update-mesh-claim-for-persistent-lane-reuse-and-auto-selection",
+  "claimed_at": "2026-05-21T15:05:54Z",
+  "last_seen": "2026-05-21T15:56:49Z",
+  "evidence": [
+    {
+      "kind": "test",
+      "command": "uv run pytest tests/test_workflow.py -q -k \"claim_auto_selects_first_idle_lane or claim_reuses_named_lane_worktree or claim_recreates_missing_lane_worktree or claim_retries_after_push_conflict or claim_creates_dedicated_worktree_when_required\"",
+      "result": "5 passed, 47 deselected in 14.11s",
+      "summary": "Focused claim regression coverage for lane auto-selection, named lane reuse, missing lane reprovision, push-conflict retry, and legacy dedicated worktree behavior.",
+      "created_at": "2026-05-21T15:38:04Z"
+    },
+    {
+      "kind": "test",
+      "command": "uv run pytest tests/test_lane.py tests/test_workflow.py -q",
+      "result": "66 passed in 71.30s",
+      "summary": "Full lane and workflow suites pass after the claim flow changes.",
+      "created_at": "2026-05-21T15:38:04Z"
+    }
+  ],
+  "events": [
+    {
+      "action": "claimed",
+      "at": "2026-05-21T15:05:54Z",
+      "by": "agent:agent:C02F80M5ML85",
+      "note": null
+    }
+  ]
+}

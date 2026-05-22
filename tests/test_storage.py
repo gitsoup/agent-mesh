@@ -1,5 +1,6 @@
 import json
 import multiprocessing
+import os
 import subprocess
 import time
 from pathlib import Path
@@ -8,6 +9,7 @@ import pytest
 
 from agent_mesh.config import ProjectConfig
 from agent_mesh.state.storage import (
+    atomic_create_json,
     atomic_write_json,
     load_json,
     resolve_repo_root,
@@ -57,6 +59,30 @@ def test_atomic_write_json_round_trips_payload(tmp_path: Path) -> None:
     atomic_write_json(path, payload)
 
     assert load_json(path) == payload
+
+
+def test_atomic_create_json_closes_fd_when_fdopen_raises(tmp_path: Path, monkeypatch) -> None:
+    path = tmp_path / ".agentic" / "project.json"
+    real_fdopen = os.fdopen
+    close_calls: list[int] = []
+
+    def failing_fdopen(fd: int, *args, **kwargs):
+        close_calls.append(fd)
+        raise OSError("synthetic fdopen failure")
+
+    def tracking_close(fd: int) -> None:
+        close_calls.append(fd)
+        os.closerange(fd, fd + 1)
+
+    monkeypatch.setattr(os, "fdopen", failing_fdopen)
+    monkeypatch.setattr(os, "close", tracking_close)
+
+    with pytest.raises(OSError, match="synthetic fdopen failure"):
+        atomic_create_json(path, {"project_name": "demo"})
+
+    assert not path.exists()
+    assert len(close_calls) == 2
+    assert close_calls[0] == close_calls[1]
 
 
 def test_resolve_repo_root_finds_git_ancestor(tmp_path: Path) -> None:
@@ -127,15 +153,8 @@ def test_create_work_item_with_unique_id_retries_under_concurrent_writers(tmp_pa
         worker.join(timeout=10)
 
     assert all(worker.exitcode == 0 for worker in workers)
-    created = sorted((repo_root / ".agentic/work").glob("APP-*.json"))
-    assert [path.stem for path in created] == [
-        "APP-1",
-        "APP-2",
-        "APP-3",
-        "APP-4",
-        "APP-5",
-        "APP-6",
-    ]
+    created = list((repo_root / ".agentic/work").glob("APP-*.json"))
+    assert {path.stem for path in created} == {f"APP-{index}" for index in range(1, 7)}
 
 
 def test_validate_state_tree_accepts_valid_project_file(tmp_path: Path) -> None:

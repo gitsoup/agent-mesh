@@ -67,10 +67,14 @@ def atomic_create_json(path: Path, payload: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        handle = os.fdopen(fd, "w", encoding="utf-8")
+        fd = -1
+        with handle:
             json.dump(payload, handle, indent=2)
             handle.write("\n")
     except Exception:
+        if fd != -1:
+            os.close(fd)
         Path(path).unlink(missing_ok=True)
         raise
 
@@ -166,8 +170,10 @@ def create_work_item_with_unique_id(
 ) -> tuple[T, Path]:
     """Allocate a sequential work ID by exclusive file creation and retry.
 
-    This keeps `mesh task add` safe under concurrent writers without requiring
-    a separate long-lived lock file.
+    This keeps `mesh task add` safe under concurrent writers on local POSIX
+    filesystems without requiring a separate long-lived lock file. `build_item`
+    may be called multiple times if ID collisions occur, so it must remain
+    side-effect-free.
     """
     for _ in range(max_attempts):
         work_id = next_work_item_id(repo_root, project_key)

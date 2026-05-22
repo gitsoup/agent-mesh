@@ -1,13 +1,55 @@
 import json
+import multiprocessing
+import os
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
 
 from agent_mesh.config import ProjectConfig
-from agent_mesh.state.storage import atomic_write_json, load_json, resolve_repo_root
+from agent_mesh.state.storage import (
+    atomic_create_json,
+    atomic_write_json,
+    load_json,
+    resolve_repo_root,
+)
 from agent_mesh.state.validate import validate_state_tree
 from agent_mesh.topology import inspect_coordination_worktree, resolve_coordination_worktree_path
+
+
+def _concurrent_work_item_creator(repo_root: str, ready: object, index: int) -> None:
+    from pathlib import Path
+
+    from agent_mesh.state.models import ProviderRef, WorkItem
+    from agent_mesh.state.storage import create_work_item_with_unique_id
+
+    repo_path = Path(repo_root)
+    ready.wait()
+
+    def build_item(work_id: str) -> WorkItem:
+        # Delay creation after ID selection so multiple processes contend for
+        # the same candidate ID before exclusive creation resolves the race.
+        time.sleep(0.1)
+        now = "2026-05-22T00:00:00Z"
+        return WorkItem(
+            id=work_id,
+            title=f"Task {index}",
+            description="Concurrent task creation probe",
+            kind="feature",
+            status="ready",
+            execution="afk_safe",
+            module="state",
+            planning=ProviderRef(provider="local"),
+            prd=None,
+            acceptance_criteria=["IDs remain unique under contention"],
+            dependencies=[],
+            risk="medium",
+            created_at=now,
+            updated_at=now,
+        )
+
+    create_work_item_with_unique_id(repo_path, "APP", build_item)
 
 
 def test_atomic_write_json_round_trips_payload(tmp_path: Path) -> None:
@@ -17,6 +59,30 @@ def test_atomic_write_json_round_trips_payload(tmp_path: Path) -> None:
     atomic_write_json(path, payload)
 
     assert load_json(path) == payload
+
+
+def test_atomic_create_json_closes_fd_when_fdopen_raises(tmp_path: Path, monkeypatch) -> None:
+    path = tmp_path / ".agentic" / "project.json"
+    real_fdopen = os.fdopen
+    close_calls: list[int] = []
+
+    def failing_fdopen(fd: int, *args, **kwargs):
+        close_calls.append(fd)
+        raise OSError("synthetic fdopen failure")
+
+    def tracking_close(fd: int) -> None:
+        close_calls.append(fd)
+        os.closerange(fd, fd + 1)
+
+    monkeypatch.setattr(os, "fdopen", failing_fdopen)
+    monkeypatch.setattr(os, "close", tracking_close)
+
+    with pytest.raises(OSError, match="synthetic fdopen failure"):
+        atomic_create_json(path, {"project_name": "demo"})
+
+    assert not path.exists()
+    assert len(close_calls) == 2
+    assert close_calls[0] == close_calls[1]
 
 
 def test_resolve_repo_root_finds_git_ancestor(tmp_path: Path) -> None:
@@ -65,6 +131,30 @@ def test_resolve_repo_root_uses_primary_worktree_for_linked_worktree(tmp_path: P
     )
 
     assert resolve_repo_root(linked_worktree) == repo_root
+
+
+def test_create_work_item_with_unique_id_retries_under_concurrent_writers(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    (repo_root / ".git").mkdir(parents=True)
+    (repo_root / ".agentic/work").mkdir(parents=True)
+
+    ready = multiprocessing.Event()
+    workers = [
+        multiprocessing.Process(
+            target=_concurrent_work_item_creator,
+            args=(str(repo_root), ready, index),
+        )
+        for index in range(6)
+    ]
+    for worker in workers:
+        worker.start()
+    ready.set()
+    for worker in workers:
+        worker.join(timeout=10)
+
+    assert all(worker.exitcode == 0 for worker in workers)
+    created = list((repo_root / ".agentic/work").glob("APP-*.json"))
+    assert {path.stem for path in created} == {f"APP-{index}" for index in range(1, 7)}
 
 
 def test_validate_state_tree_accepts_valid_project_file(tmp_path: Path) -> None:

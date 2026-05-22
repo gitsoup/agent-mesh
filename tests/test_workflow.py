@@ -1113,6 +1113,39 @@ def test_merge_returns_lane_to_idle_and_keeps_worktree(tmp_path: Path, monkeypat
     assert "{0}\tidle\twt/{0}".format(lane["workspace_id"]) in lane_list_output
 
 
+def test_merge_commits_coordination_state_changes(tmp_path: Path, monkeypatch, capsys) -> None:
+    repo_root = _init_real_git_repo(tmp_path, monkeypatch, capsys)
+    run_cli(["task", "add", "Implement auth endpoint", "--module", "api"], capsys)
+    run_cli(["claim", "APP-1", "--agent", "codex", "--role", "implementer", "--no-push"], capsys)
+
+    coordination_root = repo_root.parent / "{0}-mesh-state".format(repo_root.name)
+    claim = json.loads((coordination_root / ".agentic/claims/APP-1.json").read_text(encoding="utf-8"))
+    monkeypatch.chdir(Path(claim["worktree"]))
+    run_cli(["pr", "--dry-run", "--work-id", "APP-1"], capsys)
+    monkeypatch.chdir(repo_root)
+
+    exit_code, output = run_cli(["merge", "APP-1", "--no-push", "--skip-merge-check"], capsys)
+
+    assert exit_code == 0, output
+    status = subprocess.run(
+        ["git", "status", "--short"],
+        cwd=coordination_root,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert status.stdout.strip() == ""
+
+    latest_commit = subprocess.run(
+        ["git", "log", "--oneline", "-1"],
+        cwd=coordination_root,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert "Close APP-1; archive claim, mark merged" in latest_commit.stdout
+
+
 def test_merge_skips_worktree_removal_when_already_absent(tmp_path: Path, monkeypatch, capsys) -> None:
     repo_root = tmp_path / "demo-repo"
     repo_root.mkdir(parents=True)

@@ -621,7 +621,7 @@ def handle_task_show(args: argparse.Namespace) -> int:
 def handle_claim(args: argparse.Namespace) -> int:
     from agent_mesh.config import load_project_config
     from agent_mesh.state.models import Claim, ClaimEvent, WorkItem
-    from agent_mesh.state.storage import load_model, resolve_coordination_root, resolve_repo_root, save_model_json
+    from agent_mesh.state.storage import load_model, resolve_coordination_root, resolve_repo_root
 
     repo_root = resolve_repo_root(Path.cwd())
     coordination_root = resolve_coordination_root(repo_root)
@@ -989,10 +989,10 @@ def handle_merge(args: argparse.Namespace) -> int:
 
     # Update review packet status to merged if one exists
     review_packet_path = resolve_review_packet_path(coordination_root, args.work_id)
+    review = None
     if review_packet_path is not None:
         review = load_model(review_packet_path, ReviewPacket)
         review.status = "merged"
-        save_model_json(review_packet_path, review)
         emit("Marked review packet merged: {0}".format(review.id))
     else:
         emit("WARNING: no review packet found for {0} — dashboard may show stale review state".format(args.work_id))
@@ -1003,7 +1003,6 @@ def handle_merge(args: argparse.Namespace) -> int:
     now = utc_now()
     work_item.status = "done"
     work_item.updated_at = now
-    save_model_json(work_path, work_item)
     emit("Marked {0} done".format(args.work_id))
 
     # Archive the claim last
@@ -1021,6 +1020,25 @@ def handle_merge(args: argparse.Namespace) -> int:
     if review_packet_path is None and repaired_reviews:
         for review_id in repaired_reviews:
             emit("Reconciled review packet to merged: {0}".format(review_id))
+
+    review_packet_path = resolve_review_packet_path(coordination_root, args.work_id)
+    if review_packet_path is not None:
+        review = load_model(review_packet_path, ReviewPacket)
+        review.status = "merged"
+
+    persist_completed_work_state(
+        coordination_root,
+        config,
+        work_id=args.work_id,
+        work_item=work_item,
+        work_path=work_path,
+        claim=claim,
+        claim_path=claim_path,
+        archive_path=archive_path,
+        review_packet_path=review_packet_path,
+        review=review,
+        no_push=args.no_push,
+    )
 
     active_claim_exists = (coordination_root / ".agentic/claims" / "{0}.json".format(args.work_id)).exists()
     if active_claim_exists:
@@ -1545,6 +1563,97 @@ def sync_coordination_state_from_remote(coordination_root: Path, branch: str) ->
     ensure_git_ok(fetch, "failed to fetch latest coordination state")
     reset = run_git(coordination_root, ["reset", "--hard", "origin/{0}".format(branch)])
     ensure_git_ok(reset, "failed to reset coordination state after push conflict")
+
+
+def completed_work_state_persisted(
+    coordination_root: Path,
+    work_id: str,
+    *,
+    review_packet_path: Optional[Path],
+) -> bool:
+    from agent_mesh.state.models import ReviewPacket, WorkItem
+    from agent_mesh.state.storage import load_model
+
+    work_path = coordination_root / ".agentic/work" / "{0}.json".format(work_id)
+    archive_path = coordination_root / ".agentic/claims/archive" / "{0}.json".format(work_id)
+    active_claim_path = coordination_root / ".agentic/claims" / "{0}.json".format(work_id)
+
+    if not work_path.exists() or active_claim_path.exists() or not archive_path.exists():
+        return False
+
+    work_item = load_model(work_path, WorkItem)
+    if work_item.status != "done":
+        return False
+
+    if review_packet_path is None or not review_packet_path.exists():
+        return True
+
+    review = load_model(review_packet_path, ReviewPacket)
+    return review.status == "merged"
+
+
+def persist_completed_work_state(
+    coordination_root: Path,
+    config,
+    *,
+    work_id: str,
+    work_item,
+    work_path: Path,
+    claim,
+    claim_path: Path,
+    archive_path: Path,
+    review_packet_path: Optional[Path],
+    review,
+    no_push: bool,
+    max_attempts: int = 2,
+) -> None:
+    from agent_mesh.state.storage import save_model_json
+
+    attempts = 0
+    commit_paths = [work_path, claim_path, archive_path]
+    if review_packet_path is not None:
+        commit_paths.append(review_packet_path)
+
+    review_suffix = ""
+    if review is not None and getattr(review.pr, "number", None):
+        review_suffix = " (PR #{0})".format(review.pr.number)
+
+    while True:
+        attempts += 1
+        save_model_json(work_path, work_item)
+        save_model_json(archive_path, claim)
+        if claim_path.exists():
+            claim_path.unlink()
+        if review_packet_path is not None and review is not None:
+            save_model_json(review_packet_path, review)
+
+        if not git_head_available(coordination_root):
+            return
+
+        commit_coordination_state(
+            coordination_root,
+            commit_paths,
+            "Close {0}; archive claim, mark merged{1}".format(work_id, review_suffix),
+        )
+
+        if no_push or not coordination_remote_exists(coordination_root):
+            return
+
+        push_result = push_coordination_state(coordination_root, config.coordination.branch)
+        if push_result.returncode == 0:
+            return
+
+        detail = (push_result.stderr or push_result.stdout).strip() or "unknown git error"
+        if attempts >= max_attempts or not coordination_push_conflict(detail):
+            raise RuntimeError("failed to push completed work state: {0}".format(detail))
+
+        sync_coordination_state_from_remote(coordination_root, config.coordination.branch)
+        if completed_work_state_persisted(
+            coordination_root,
+            work_id,
+            review_packet_path=review_packet_path,
+        ):
+            return
 
 
 def persist_new_claim_state(

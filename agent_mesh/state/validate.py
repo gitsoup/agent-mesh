@@ -13,6 +13,7 @@ from agent_mesh.state.models import Claim, ReviewPacket, WorkItem
 from agent_mesh.state.storage import (
     iter_json_files,
     list_claims,
+    list_effective_work_items,
     list_reviews,
     list_work_items,
     load_json,
@@ -36,7 +37,9 @@ def validate_state_tree(repo_root: Path, coordination_root: Path | None = None) 
     except ValidationError as exc:
         errors.append(f"Invalid .agentic/project.json: {exc}")
 
-    errors.extend(validate_directory(coordination_root / ".agentic/work", WorkItem))
+    errors.extend(validate_directory(repo_root / ".agentic/work", WorkItem))
+    if coordination_root != repo_root:
+        errors.extend(validate_directory(coordination_root / ".agentic/work", WorkItem))
     errors.extend(validate_directory(coordination_root / ".agentic/claims", Claim))
     errors.extend(validate_directory(coordination_root / ".agentic/reviews", ReviewPacket))
     errors.extend(validate_required_paths(repo_root, coordination_root))
@@ -44,7 +47,7 @@ def validate_state_tree(repo_root: Path, coordination_root: Path | None = None) 
         errors.extend(validate_adapter_artifacts(repo_root, config))
         errors.extend(validate_coordination_topology(repo_root, config))
     if not errors:
-        errors.extend(validate_relationships(coordination_root))
+        errors.extend(validate_relationships(repo_root, coordination_root))
     return errors
 
 
@@ -75,7 +78,6 @@ def validate_required_paths(repo_root: Path, coordination_root: Path) -> list[st
     ]
     # Live-state paths live in coordination_root (may equal repo_root when no worktree)
     state_required = [
-        coordination_root / ".agentic/work",
         coordination_root / ".agentic/claims",
         coordination_root / ".agentic/reviews",
     ]
@@ -154,9 +156,9 @@ def validate_skill_wrapper_tree(repo_root: Path, base_dir: Path, adapter: str) -
     return errors
 
 
-def validate_relationships(coordination_root: Path) -> list[str]:
+def validate_relationships(repo_root: Path, coordination_root: Path) -> list[str]:
     errors: list[str] = []
-    work_items = {item.id: item for item in list_work_items(coordination_root)}
+    work_items = {item.id: item for item in list_effective_work_items(repo_root, coordination_root)}
     claims = list_claims(coordination_root)
     reviews = list_reviews(coordination_root)
 
@@ -174,7 +176,7 @@ def validate_relationships(coordination_root: Path) -> list[str]:
             errors.append(f"Review references missing work item: {review.work_id}")
         if review.status != "merged" and not (coordination_root / review.context.claim).exists():
             errors.append(f"Review references missing claim file: {review.context.claim}")
-        if not (coordination_root / review.context.work_item).exists():
+        if not (coordination_root / review.context.work_item).exists() and not (repo_root / review.context.work_item).exists():
             errors.append(f"Review references missing work file: {review.context.work_item}")
     return errors
 

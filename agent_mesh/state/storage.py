@@ -79,6 +79,26 @@ def list_work_items(repo_root: Path) -> List[WorkItem]:
     return [load_model(path, WorkItem) for path in iter_json_files(repo_root / ".agentic/work")]
 
 
+def list_effective_work_items(repo_root: Path, coordination_root: Path | None = None) -> List[WorkItem]:
+    items: dict[str, WorkItem] = {item.id: item for item in list_work_items(repo_root)}
+    if coordination_root is not None and coordination_root != repo_root:
+        for path in iter_json_files(coordination_root / ".agentic/work"):
+            try:
+                item = load_model(path, WorkItem)
+            except Exception:
+                continue
+            items[item.id] = item
+    return sorted(items.values(), key=lambda item: item.id)
+
+
+def resolve_shared_work_item_path(repo_root: Path, work_id: str) -> Path:
+    return repo_root / ".agentic/work" / "{0}.json".format(work_id)
+
+
+def resolve_live_work_item_path(coordination_root: Path, work_id: str) -> Path:
+    return coordination_root / ".agentic/work" / "{0}.json".format(work_id)
+
+
 def list_claims(repo_root: Path) -> List[Claim]:
     return [load_model(path, Claim) for path in iter_json_files(repo_root / ".agentic/claims")]
 

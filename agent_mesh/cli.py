@@ -558,13 +558,13 @@ def handle_lane_add(args: argparse.Namespace) -> int:
 
 def handle_status(args: argparse.Namespace) -> int:
     from agent_mesh.config import load_project_config
-    from agent_mesh.state.storage import list_claims, list_reviews, list_work_items, resolve_coordination_root, resolve_repo_root
+    from agent_mesh.state.storage import list_claims, list_effective_work_items, list_reviews, resolve_coordination_root, resolve_repo_root
     from agent_mesh.topology import inspect_coordination_worktree
 
     repo_root = resolve_repo_root(Path.cwd())
     coordination_root = resolve_coordination_root(repo_root)
     config = load_project_config(repo_root)
-    work_items = list_work_items(coordination_root)
+    work_items = list_effective_work_items(repo_root, coordination_root)
     claims = list_claims(coordination_root)
     reviews = list_reviews(coordination_root)
     coordination = inspect_coordination_worktree(repo_root, config)
@@ -753,12 +753,11 @@ def adapter_install_hints_from_errors(errors: Iterable[str]) -> List[str]:
 def handle_task_add(args: argparse.Namespace) -> int:
     from agent_mesh.config import load_project_config
     from agent_mesh.state.models import ProviderRef, WorkItem
-    from agent_mesh.state.storage import next_work_item_id, resolve_coordination_root, resolve_repo_root, save_model_json
+    from agent_mesh.state.storage import next_work_item_id, resolve_repo_root, save_model_json
 
     repo_root = resolve_repo_root(Path.cwd())
-    coordination_root = resolve_coordination_root(repo_root)
     config = load_project_config(repo_root)
-    work_id = next_work_item_id(coordination_root, config.project_key)
+    work_id = next_work_item_id(repo_root, config.project_key)
     now = utc_now()
 
     description = args.description or args.title
@@ -779,18 +778,18 @@ def handle_task_add(args: argparse.Namespace) -> int:
         created_at=now,
         updated_at=now,
     )
-    path = coordination_root / ".agentic/work" / "{0}.json".format(work_id)
+    path = repo_root / ".agentic/work" / "{0}.json".format(work_id)
     save_model_json(path, work_item)
     emit("Created task {0}".format(work_id))
     return 0
 
 
 def handle_task_list(_: argparse.Namespace) -> int:
-    from agent_mesh.state.storage import list_work_items, resolve_coordination_root, resolve_repo_root
+    from agent_mesh.state.storage import list_effective_work_items, resolve_coordination_root, resolve_repo_root
 
     repo_root = resolve_repo_root(Path.cwd())
     coordination_root = resolve_coordination_root(repo_root)
-    for work_item in list_work_items(coordination_root):
+    for work_item in list_effective_work_items(repo_root, coordination_root):
         emit("{0}\t{1}\t{2}".format(work_item.id, work_item.status, work_item.title))
     return 0
 
@@ -801,7 +800,7 @@ def handle_task_show(args: argparse.Namespace) -> int:
 
     repo_root = resolve_repo_root(Path.cwd())
     coordination_root = resolve_coordination_root(repo_root)
-    work_item = load_model(coordination_root / ".agentic/work" / "{0}.json".format(args.work_id), WorkItem)
+    work_item = load_model(resolve_current_work_item_path(repo_root, coordination_root, args.work_id), WorkItem)
     emit(work_item.model_dump_json(indent=2))
     return 0
 
@@ -809,7 +808,7 @@ def handle_task_show(args: argparse.Namespace) -> int:
 def handle_bootstrap_tasks(args: argparse.Namespace) -> int:
     from agent_mesh.config import load_project_config
     from agent_mesh.state.models import ProviderRef, WorkItem
-    from agent_mesh.state.storage import next_work_item_id, resolve_coordination_root, resolve_repo_root, save_model_json
+    from agent_mesh.state.storage import resolve_coordination_root, resolve_repo_root, save_model_json
 
     repo_root = resolve_repo_root(Path.cwd())
     coordination_root = resolve_coordination_root(repo_root)
@@ -826,7 +825,7 @@ def handle_bootstrap_tasks(args: argparse.Namespace) -> int:
         emit("ERROR: bootstrap payload did not contain any tasks.")
         return 1
 
-    work_dir = coordination_root / ".agentic/work"
+    work_dir = repo_root / ".agentic/work"
     existing_ids = {path.stem for path in work_dir.glob("*.json")}
     assigned_ids = set(existing_ids)
     created = 0
@@ -840,6 +839,7 @@ def handle_bootstrap_tasks(args: argparse.Namespace) -> int:
             work_item, work_id, existed = _normalize_bootstrap_task(
                 task_input=task_input,
                 config=config,
+                repo_root=repo_root,
                 coordination_root=coordination_root,
                 assigned_ids=assigned_ids,
             )
@@ -871,7 +871,10 @@ def handle_claim(args: argparse.Namespace) -> int:
     repo_root = resolve_repo_root(Path.cwd())
     coordination_root = resolve_coordination_root(repo_root)
     config = load_project_config(repo_root)
-    work_path = coordination_root / ".agentic/work" / "{0}.json".format(args.work_id)
+    work_path = resolve_current_work_item_path(repo_root, coordination_root, args.work_id)
+    if not work_path.exists():
+        emit("ERROR: work item {0} not found".format(args.work_id))
+        return 1
     work_item = load_model(work_path, WorkItem)
 
     existing_claim_path = coordination_root / ".agentic/claims" / "{0}.json".format(args.work_id)
@@ -943,6 +946,7 @@ def handle_claim(args: argparse.Namespace) -> int:
     )
     work_item.status = "in_progress"
     work_item.updated_at = now
+    work_path = materialize_live_work_item(repo_root, coordination_root, args.work_id)
     try:
         persist_new_claim_state(
             repo_root,
@@ -974,7 +978,8 @@ def handle_pr(args: argparse.Namespace) -> int:
     repo_root = resolve_repo_root(Path.cwd())
     coordination_root = resolve_coordination_root(repo_root)
     config = load_project_config(repo_root)
-    work_item = load_model(coordination_root / ".agentic/work" / "{0}.json".format(args.work_id), WorkItem)
+    work_path = resolve_current_work_item_path(repo_root, coordination_root, args.work_id)
+    work_item = load_model(work_path, WorkItem)
     claim = load_model(coordination_root / ".agentic/claims" / "{0}.json".format(args.work_id), Claim)
 
     if claim.worktree:
@@ -1000,7 +1005,7 @@ def handle_pr(args: argparse.Namespace) -> int:
 
     work_item.status = "pr_open"
     work_item.updated_at = utc_now()
-    save_model_json(coordination_root / ".agentic/work" / "{0}.json".format(args.work_id), work_item)
+    save_model_json(materialize_live_work_item(repo_root, coordination_root, args.work_id), work_item)
 
     if args.dry_run:
         emit("Dry-run: review packet written to {0}".format(review_packet_path))
@@ -1015,7 +1020,7 @@ def handle_review_packet(args: argparse.Namespace) -> int:
     repo_root = resolve_repo_root(Path.cwd())
     coordination_root = resolve_coordination_root(repo_root)
     config = load_project_config(repo_root)
-    work_item = load_model(coordination_root / ".agentic/work" / "{0}.json".format(args.work_id), WorkItem)
+    work_item = load_model(resolve_current_work_item_path(repo_root, coordination_root, args.work_id), WorkItem)
     claim = load_model(coordination_root / ".agentic/claims" / "{0}.json".format(args.work_id), Claim)
     review_packet = create_review_packet(config, work_item, claim)
     review_packet_path = coordination_root / ".agentic/reviews" / "{0}.json".format(review_packet.id)
@@ -1037,7 +1042,7 @@ def handle_review(args: argparse.Namespace) -> int:
 
     review_packet = load_model(review_path, ReviewPacket)
     claim = load_model(coordination_root / review_packet.context.claim, Claim)
-    work_item = load_model(coordination_root / review_packet.context.work_item, WorkItem)
+    work_item = load_model(resolve_current_work_item_path(repo_root, coordination_root, review_packet.work_id), WorkItem)
 
     emit("Review packet: {0}".format(review_packet.id))
     emit("Work item: {0} ({1})".format(work_item.id, work_item.title))
@@ -1079,7 +1084,7 @@ def build_dashboard(
 ) -> None:
     from agent_mesh.config import load_project_config
     from agent_mesh.dashboard import build_dashboard_payload, render_dashboard_html
-    from agent_mesh.state.storage import list_claims, list_reviews, list_work_items, resolve_coordination_root
+    from agent_mesh.state.storage import list_claims, list_effective_work_items, list_reviews, resolve_coordination_root
 
     if coordination_root is None:
         coordination_root = resolve_coordination_root(repo_root)
@@ -1087,7 +1092,7 @@ def build_dashboard(
     target_dir = output_dir or ("dist/public-dashboard" if public else config.dashboard.output_dir)
     output_path = repo_root / target_dir / "index.html"
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    work_items = list_work_items(coordination_root)
+    work_items = list_effective_work_items(repo_root, coordination_root)
     claims = list_claims(coordination_root)
     reviews = list_reviews(coordination_root)
     payload = build_dashboard_payload(config, work_items, claims, reviews, public=public)
@@ -1128,7 +1133,7 @@ def handle_merge(args: argparse.Namespace) -> int:
     warnings_fired = False
     lane = None
 
-    work_path = coordination_root / ".agentic/work" / "{0}.json".format(args.work_id)
+    work_path = resolve_current_work_item_path(repo_root, coordination_root, args.work_id)
     if not work_path.exists():
         emit("ERROR: work item {0} not found".format(args.work_id))
         return 1
@@ -1268,6 +1273,7 @@ def handle_merge(args: argparse.Namespace) -> int:
     now = utc_now()
     work_item.status = "done"
     work_item.updated_at = now
+    work_path = materialize_live_work_item(repo_root, coordination_root, args.work_id)
     emit("Marked {0} done".format(args.work_id))
 
     # Archive the claim last
@@ -1281,7 +1287,7 @@ def handle_merge(args: argparse.Namespace) -> int:
         emit("WARNING: claim file already moved by a concurrent process — skipping archive")
         warnings_fired = True
 
-    repaired_reviews = reconcile_completed_review_packets(coordination_root, args.work_id)
+    repaired_reviews = reconcile_completed_review_packets(repo_root, coordination_root, args.work_id)
     if review_packet_path is None and repaired_reviews:
         for review_id in repaired_reviews:
             emit("Reconciled review packet to merged: {0}".format(review_id))
@@ -1360,7 +1366,7 @@ def handle_sync(_: argparse.Namespace) -> int:
             emit("ERROR: {0}".format(error))
             return 1
 
-    repaired_reviews = reconcile_completed_review_packets(coordination_root)
+    repaired_reviews = reconcile_completed_review_packets(repo_root, coordination_root)
     for review_id in repaired_reviews:
         emit("Reconciled review packet to merged: {0}".format(review_id))
 
@@ -1427,6 +1433,7 @@ def _normalize_bootstrap_task(
     *,
     task_input: dict,
     config,
+    repo_root: Path,
     coordination_root: Path,
     assigned_ids: set[str],
 ):
@@ -1441,13 +1448,13 @@ def _normalize_bootstrap_task(
     if requested_id:
         work_id = requested_id
     else:
-        work_id = next_work_item_id(coordination_root, config.project_key)
+        work_id = next_work_item_id(repo_root, config.project_key)
         while work_id in assigned_ids:
             suffix = int(work_id.split("-")[-1]) + 1
             work_id = "{0}-{1}".format(config.project_key, suffix)
 
     now = utc_now()
-    target_path = coordination_root / ".agentic/work" / "{0}.json".format(work_id)
+    target_path = repo_root / ".agentic/work" / "{0}.json".format(work_id)
     existed = target_path.exists()
     created_at = now
     if existed:
@@ -1533,22 +1540,39 @@ def load_work_item(path: Path):
     return load_model(path, WorkItem)
 
 
-def reconcile_completed_review_packets(coordination_root: Path, work_id: Optional[str] = None) -> list[str]:
-    from agent_mesh.state.models import ReviewPacket, WorkItem
-    from agent_mesh.state.storage import iter_json_files, load_model, save_model_json
+def resolve_current_work_item_path(repo_root: Path, coordination_root: Path, work_id: str) -> Path:
+    from agent_mesh.state.storage import resolve_live_work_item_path, resolve_shared_work_item_path
 
-    work_items_dir = coordination_root / ".agentic/work"
+    live_path = resolve_live_work_item_path(coordination_root, work_id)
+    if live_path.exists():
+        return live_path
+    return resolve_shared_work_item_path(repo_root, work_id)
+
+
+def materialize_live_work_item(repo_root: Path, coordination_root: Path, work_id: str) -> Path:
+    from agent_mesh.state.storage import resolve_live_work_item_path, resolve_shared_work_item_path, save_model_json
+
+    live_path = resolve_live_work_item_path(coordination_root, work_id)
+    if live_path.exists() or coordination_root == repo_root:
+        return live_path
+
+    shared_path = resolve_shared_work_item_path(repo_root, work_id)
+    if not shared_path.exists():
+        raise FileNotFoundError("work item {0} not found".format(work_id))
+    work_item = load_work_item(shared_path)
+    save_model_json(live_path, work_item)
+    return live_path
+
+
+def reconcile_completed_review_packets(repo_root: Path, coordination_root: Path, work_id: Optional[str] = None) -> list[str]:
+    from agent_mesh.state.models import ReviewPacket, WorkItem
+    from agent_mesh.state.storage import iter_json_files, list_effective_work_items, load_model, save_model_json
+
     reviews_dir = coordination_root / ".agentic/reviews"
-    if not reviews_dir.exists() or not work_items_dir.exists():
+    if not reviews_dir.exists():
         return []
 
-    work_items = {}
-    for path in iter_json_files(work_items_dir):
-        try:
-            item = load_model(path, WorkItem)
-        except Exception:
-            continue
-        work_items[item.id] = item
+    work_items = {item.id: item for item in list_effective_work_items(repo_root, coordination_root)}
 
     repaired: list[str] = []
     for path in iter_json_files(reviews_dir):
@@ -1617,7 +1641,7 @@ def handle_existing_claim(repo_root, coordination_root, config, work_item, claim
         if work_item.status == "ready":
             work_item.status = "in_progress"
             work_item.updated_at = now
-            save_model_json(coordination_root / ".agentic/work" / "{0}.json".format(work_item.id), work_item)
+            save_model_json(materialize_live_work_item(repo_root, coordination_root, work_item.id), work_item)
         emit("Resumed {0} on branch {1}".format(work_item.id, claim.branch))
         if claim.worktree:
             emit("Worktree: {0}".format(claim.worktree))
@@ -1672,7 +1696,7 @@ def handle_existing_claim(repo_root, coordination_root, config, work_item, claim
         if work_item.status == "ready":
             work_item.status = "in_progress"
             work_item.updated_at = now
-            save_model_json(coordination_root / ".agentic/work" / "{0}.json".format(work_item.id), work_item)
+            save_model_json(materialize_live_work_item(repo_root, coordination_root, work_item.id), work_item)
         emit("Took over stale claim for {0} on branch {1}".format(work_item.id, claim.branch))
         if claim.worktree:
             emit("Worktree: {0}".format(claim.worktree))

@@ -2009,6 +2009,22 @@ def test_bootstrap_tasks_updates_existing_work_item_from_input_file(
     assert work_item["dependencies"] == ["APP-2"]
 
 
+def test_status_and_dashboard_use_shared_root_work_items_with_coordination_worktree(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    repo_root = init_real_repo(tmp_path, monkeypatch, capsys)
+
+    exit_code, _ = run_cli(["task", "add", "Seed brownfield backlog", "--module", "core"], capsys)
+    assert exit_code == 0
+
+    status_exit, status_output = run_cli(["status"], capsys)
+
+    assert status_exit == 0
+    assert "Tasks: 1" in status_output
+    dashboard_html = (repo_root / "dist/mesh-dashboard/index.html").read_text(encoding="utf-8")
+    assert "Seed brownfield backlog" in dashboard_html
+
+
 def test_opencode_skill_list_shows_installed(tmp_path: Path, monkeypatch, capsys) -> None:
     repo_root = tmp_path / "demo-repo"
     (repo_root / ".git").mkdir(parents=True)

@@ -228,7 +228,7 @@ def handle_init(args: argparse.Namespace) -> int:
     from agent_mesh.config import load_project_config
     from agent_mesh.scaffold import init_repo
     from agent_mesh.state.storage import resolve_repo_root
-    from agent_mesh.topology import ensure_coordination_worktree
+    from agent_mesh.topology import ensure_coordination_worktree, inspect_coordination_worktree
 
     try:
         repo_root = resolve_repo_root(Path.cwd())
@@ -241,11 +241,25 @@ def handle_init(args: argparse.Namespace) -> int:
     project_name = args.project_name or repo_root.name
     project_key = args.project_key or derive_project_key(project_name)
     adapters = parse_csv(args.adapters)
+    existing_project = repo_root / ".agentic/project.json"
+
+    if args.worktree_policy != "off" and git_head_available(repo_root):
+        identity_required = not existing_project.exists()
+        if existing_project.exists():
+            try:
+                status = inspect_coordination_worktree(repo_root, load_project_config(repo_root))
+                identity_required = status.state == "missing"
+            except Exception:
+                identity_required = True
+        if identity_required and not git_identity_configured(repo_root):
+            emit("ERROR: git identity is not configured for this repository.")
+            emit('Run: git config user.name "Your Name"')
+            emit('Run: git config user.email "you@example.com"')
+            return 1
 
     # Stash existing lanes before init_repo rewrites project.json
-    _existing_project = repo_root / ".agentic/project.json"
     existing_lanes = []
-    if _existing_project.exists():
+    if existing_project.exists():
         try:
             existing_lanes = list(load_project_config(repo_root).coordination.lanes)
         except Exception as err:
@@ -1317,6 +1331,14 @@ def parse_csv(raw: str) -> List[str]:
 def git_head_available(repo_root: Path) -> bool:
     result = run_git(repo_root, ["rev-parse", "--verify", "HEAD"])
     return result.returncode == 0
+
+
+def git_identity_configured(repo_root: Path) -> bool:
+    for key in ["user.name", "user.email"]:
+        result = run_git(repo_root, ["config", key])
+        if result.returncode != 0 or not result.stdout.strip():
+            return False
+    return True
 
 
 def resolve_review_packet_path(coordination_root: Path, target: str) -> Optional[Path]:

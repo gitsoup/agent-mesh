@@ -3,7 +3,7 @@ import subprocess
 import json
 from pathlib import Path
 
-from agent_mesh.cli import app, derive_project_key
+from agent_mesh.cli import _bootstrap_project_json, app, derive_project_key
 
 
 def run_cli(args, capsys):
@@ -96,6 +96,37 @@ def init_real_repo_without_identity(tmp_path: Path, monkeypatch) -> Path:
         env=env,
     )
     monkeypatch.chdir(repo_root)
+    return repo_root
+
+
+def create_pending_coordination_scaffold(tmp_path: Path, monkeypatch) -> Path:
+    from agent_mesh.config import load_project_config
+    from agent_mesh.scaffold import init_repo
+    from agent_mesh.topology import ensure_coordination_worktree
+
+    repo_root = init_real_repo_without_identity(tmp_path, monkeypatch)
+    _bootstrap_project_json(
+        repo_root,
+        "demo",
+        "APP",
+        "local",
+        ["generic"],
+        True,
+        "required",
+        None,
+        120,
+    )
+    config = load_project_config(repo_root)
+    coordination = ensure_coordination_worktree(repo_root, config)
+    init_repo(
+        repo_root=repo_root,
+        project_name="demo",
+        project_key="APP",
+        provider="local",
+        adapters=["generic"],
+        worktree_policy="required",
+        coordination_root=coordination.path,
+    )
     return repo_root
 
 
@@ -689,7 +720,7 @@ def test_init_creates_coordination_worktree_for_real_git_repo(
     )
 
 
-def test_init_without_git_identity_leaves_actionable_pending_scaffold(
+def test_init_without_git_identity_fails_preflight_before_writing_state(
     tmp_path: Path, monkeypatch, capsys
 ) -> None:
     repo_root = init_real_repo_without_identity(tmp_path, monkeypatch)
@@ -709,40 +740,20 @@ def test_init_without_git_identity_leaves_actionable_pending_scaffold(
         capsys,
     )
 
-    assert exit_code == 0
-    assert "Coordination worktree created: mesh/state @" in output
-    assert "coordination scaffold is pending" in output
-    assert "run `mesh sync` to finalize it" in output
+    assert exit_code == 1
+    assert "ERROR: git identity is not configured for this repository." in output
+    assert 'Run: git config user.name "Your Name"' in output
+    assert 'Run: git config user.email "you@example.com"' in output
 
     coordination_path = repo_root.parent / "{0}-mesh-state".format(repo_root.name)
-    head = subprocess.run(
-        ["git", "rev-parse", "--verify", "HEAD"],
-        cwd=coordination_path,
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    assert head.returncode != 0
+    assert not coordination_path.exists()
+    assert not (repo_root / ".agentic/project.json").exists()
 
 
 def test_sync_finalizes_pending_coordination_scaffold_after_git_identity_is_configured(
     tmp_path: Path, monkeypatch, capsys
 ) -> None:
-    repo_root = init_real_repo_without_identity(tmp_path, monkeypatch)
-    run_cli(
-        [
-            "init",
-            "--project-name",
-            "demo",
-            "--project-key",
-            "APP",
-            "--provider",
-            "local",
-            "--worktree-policy",
-            "required",
-        ],
-        capsys,
-    )
+    repo_root = create_pending_coordination_scaffold(tmp_path, monkeypatch)
     subprocess.run(
         ["git", "config", "user.email", "mesh@example.com"],
         cwd=repo_root,
@@ -784,21 +795,7 @@ def test_sync_finalizes_pending_coordination_scaffold_after_git_identity_is_conf
 def test_init_rerun_with_pending_coordination_scaffold_stays_actionable(
     tmp_path: Path, monkeypatch, capsys
 ) -> None:
-    repo_root = init_real_repo_without_identity(tmp_path, monkeypatch)
-    run_cli(
-        [
-            "init",
-            "--project-name",
-            "demo",
-            "--project-key",
-            "APP",
-            "--provider",
-            "local",
-            "--worktree-policy",
-            "required",
-        ],
-        capsys,
-    )
+    repo_root = create_pending_coordination_scaffold(tmp_path, monkeypatch)
 
     exit_code, output = run_cli(
         [

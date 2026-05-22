@@ -1376,6 +1376,30 @@ def test_merge_discard_uncommitted_returns_lane_to_idle(tmp_path: Path, monkeypa
     assert not (worktree_path / "dirty.txt").exists()
 
 
+def test_merge_warns_when_lane_worktree_is_missing(tmp_path: Path, monkeypatch, capsys) -> None:
+    repo_root = init_real_repo(tmp_path, monkeypatch, capsys, lanes=1)
+    run_cli(["task", "add", "Implement auth endpoint", "--module", "api"], capsys)
+    run_cli(["claim", "APP-1", "--agent", "codex", "--role", "implementer", "--no-push"], capsys)
+
+    coordination_root = repo_root.parent / "{0}-mesh-state".format(repo_root.name)
+    claim = json.loads((coordination_root / ".agentic/claims/APP-1.json").read_text(encoding="utf-8"))
+    worktree_path = Path(claim["worktree"])
+
+    monkeypatch.chdir(worktree_path)
+    run_cli(["pr", "--dry-run", "--work-id", "APP-1"], capsys)
+    monkeypatch.chdir(repo_root)
+
+    subprocess.run(["git", "worktree", "remove", "--force", str(worktree_path)], cwd=repo_root, check=True, capture_output=True)
+    assert not worktree_path.exists()
+
+    exit_code, output = run_cli(["merge", "APP-1", "--no-push", "--skip-merge-check"], capsys)
+
+    assert exit_code == 2
+    assert "WARNING: lane worktree missing during merge" in output
+    assert "Marked APP-1 done" in output
+    assert (coordination_root / ".agentic/claims/archive/APP-1.json").exists()
+
+
 def test_merge_allows_immediate_reclaim_on_same_lane(tmp_path: Path, monkeypatch, capsys) -> None:
     repo_root = init_real_repo(tmp_path, monkeypatch, capsys, lanes=1)
     run_cli(["task", "add", "First task", "--module", "api"], capsys)
@@ -1421,7 +1445,7 @@ def test_merge_from_inside_task_worktree_completes_dashboard_rebuild(tmp_path: P
     exit_code, output = run_cli(["merge", "APP-1", "--no-push", "--skip-merge-check"], capsys)
 
     assert exit_code == 0, output
-    assert "Reset lane worktree to origin/main" in output or "Removed worktree" in output
+    assert "Removed worktree" in output
     assert "Built dashboard" in output
     assert (coordination_root / ".agentic/claims/archive/APP-1.json").exists()
 

@@ -1,0 +1,23 @@
+{
+  "schema_version": "0.1",
+  "work_id": "MESH-23",
+  "status": "in_progress",
+  "claimed_by": "agent:agent:C02F80M5ML85",
+  "agent_runtime": "agent",
+  "role": "implementer",
+  "machine": "C02F80M5ML85",
+  "workspace_id": "agent-c02f80m5ml85",
+  "worktree": "/Users/karthick/projects/mesh/agent-mesh-agent-c02f80m5ml85",
+  "branch": "feat/MESH-23-detect-incomplete-brownfield-mesh-adoption-in-root-agents-md",
+  "claimed_at": "2026-05-22T22:49:10Z",
+  "last_seen": "2026-05-22T22:49:10Z",
+  "evidence": [],
+  "events": [
+    {
+      "action": "claimed",
+      "at": "2026-05-22T22:49:10Z",
+      "by": "agent:agent:C02F80M5ML85",
+      "note": null
+    }
+  ]
+}

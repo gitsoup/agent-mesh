@@ -63,6 +63,21 @@ The public export is designed for static hosting such as Cloudflare Pages. It
 keeps task progress and review state visible while redacting coordination-only
 fields such as worktree paths, workspace IDs, machine names, and branch names.
 
+## Task Bootstrap
+
+`mesh init` creates the coordination contract, but it does not invent work on
+its own. Agents should inspect the repo and any available planning sources,
+derive an initial task list, then persist it through Mesh:
+
+```bash
+mesh bootstrap-tasks < bootstrap-tasks.json
+mesh sync
+```
+
+`mesh bootstrap-tasks` accepts either a JSON array of task objects or an object
+with a top-level `tasks` array. Missing task IDs are assigned automatically
+using the repo project key.
+
 ## Adapter Activation
 
 `mesh init` establishes the shared repo contract. It does not require every

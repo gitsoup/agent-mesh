@@ -75,6 +75,7 @@ mesh status
 mesh skill list
 mesh adapter list
 mesh adapter install
+mesh bootstrap-tasks
 mesh task add
 mesh task list
 mesh task show

@@ -8,6 +8,7 @@ import os
 import re
 import socket
 import subprocess
+import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Iterable, List, Optional, Sequence
@@ -142,6 +143,16 @@ def build_parser() -> argparse.ArgumentParser:
     task_show_parser = task_subparsers.add_parser("show", help="Show one local work item.")
     task_show_parser.add_argument("work_id")
     task_show_parser.set_defaults(func=handle_task_show)
+
+    bootstrap_tasks_parser = subparsers.add_parser(
+        "bootstrap-tasks",
+        help="Persist agent-prepared bootstrap tasks into the coordination work list.",
+    )
+    bootstrap_tasks_parser.add_argument(
+        "--input",
+        help="Read bootstrap task JSON from a file path instead of stdin.",
+    )
+    bootstrap_tasks_parser.set_defaults(func=handle_bootstrap_tasks)
 
     claim_parser = subparsers.add_parser("claim", help="Claim a local work item.")
     claim_parser.add_argument("work_id")
@@ -795,6 +806,63 @@ def handle_task_show(args: argparse.Namespace) -> int:
     return 0
 
 
+def handle_bootstrap_tasks(args: argparse.Namespace) -> int:
+    from agent_mesh.config import load_project_config
+    from agent_mesh.state.models import ProviderRef, WorkItem
+    from agent_mesh.state.storage import next_work_item_id, resolve_coordination_root, resolve_repo_root, save_model_json
+
+    repo_root = resolve_repo_root(Path.cwd())
+    coordination_root = resolve_coordination_root(repo_root)
+    config = load_project_config(repo_root)
+
+    try:
+        payload = _load_bootstrap_task_payload(args.input)
+    except ValueError as error:
+        emit("ERROR: {0}".format(error))
+        return 1
+
+    task_inputs = _extract_bootstrap_task_inputs(payload)
+    if not task_inputs:
+        emit("ERROR: bootstrap payload did not contain any tasks.")
+        return 1
+
+    work_dir = coordination_root / ".agentic/work"
+    existing_ids = {path.stem for path in work_dir.glob("*.json")}
+    assigned_ids = set(existing_ids)
+    created = 0
+    updated = 0
+
+    for task_input in task_inputs:
+        if not isinstance(task_input, dict):
+            emit("ERROR: each bootstrap task must be a JSON object.")
+            return 1
+        try:
+            work_item, work_id, existed = _normalize_bootstrap_task(
+                task_input=task_input,
+                config=config,
+                coordination_root=coordination_root,
+                assigned_ids=assigned_ids,
+            )
+        except ValueError as error:
+            emit("ERROR: {0}".format(error))
+            return 1
+        assigned_ids.add(work_id)
+        save_model_json(work_dir / "{0}.json".format(work_id), work_item)
+        if existed:
+            updated += 1
+        else:
+            created += 1
+
+    emit(
+        "Bootstrapped {0} tasks ({1} created, {2} updated).".format(
+            len(task_inputs), created, updated
+        )
+    )
+    if config.dashboard.enabled:
+        build_dashboard(repo_root, coordination_root)
+    return 0
+
+
 def handle_claim(args: argparse.Namespace) -> int:
     from agent_mesh.config import load_project_config
     from agent_mesh.state.models import Claim, ClaimEvent, WorkItem
@@ -1328,6 +1396,100 @@ def parse_csv(raw: str) -> List[str]:
     return [item.strip() for item in raw.split(",") if item.strip()]
 
 
+def _load_bootstrap_task_payload(input_path: Optional[str]) -> object:
+    if input_path:
+        raw = Path(input_path).read_text(encoding="utf-8")
+    else:
+        if sys.stdin.isatty():
+            raise ValueError(
+                "bootstrap-tasks expects JSON on stdin or via --input PATH."
+            )
+        raw = sys.stdin.read()
+    if not raw.strip():
+        raise ValueError("bootstrap-tasks received empty input.")
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError as error:
+        raise ValueError("bootstrap-tasks input is not valid JSON: {0}".format(error)) from error
+
+
+def _extract_bootstrap_task_inputs(payload: object) -> list[dict]:
+    if isinstance(payload, list):
+        return payload
+    if isinstance(payload, dict):
+        tasks = payload.get("tasks")
+        if isinstance(tasks, list):
+            return tasks
+    raise ValueError("bootstrap-tasks input must be a JSON array or an object with a `tasks` array.")
+
+
+def _normalize_bootstrap_task(
+    *,
+    task_input: dict,
+    config,
+    coordination_root: Path,
+    assigned_ids: set[str],
+):
+    from agent_mesh.state.models import ProviderRef, WorkItem
+    from agent_mesh.state.storage import next_work_item_id
+
+    title = str(task_input.get("title", "")).strip()
+    if not title:
+        raise ValueError("bootstrap task is missing required field `title`.")
+
+    requested_id = str(task_input.get("id", "")).strip() or None
+    if requested_id:
+        work_id = requested_id
+    else:
+        work_id = next_work_item_id(coordination_root, config.project_key)
+        while work_id in assigned_ids:
+            suffix = int(work_id.split("-")[-1]) + 1
+            work_id = "{0}-{1}".format(config.project_key, suffix)
+
+    now = utc_now()
+    target_path = coordination_root / ".agentic/work" / "{0}.json".format(work_id)
+    existed = target_path.exists()
+    created_at = now
+    if existed:
+        try:
+            existing_item = load_work_item(target_path)
+            created_at = existing_item.created_at
+        except Exception:
+            created_at = now
+
+    planning_input = task_input.get("planning") if isinstance(task_input.get("planning"), dict) else {}
+    provider = str(planning_input.get("provider") or config.planning.provider)
+    planning = ProviderRef(
+        provider=provider,
+        url=planning_input.get("url"),
+        external_id=planning_input.get("external_id"),
+    )
+    acceptance = task_input.get("acceptance_criteria") or task_input.get("acceptance") or []
+    if not isinstance(acceptance, list):
+        raise ValueError("bootstrap task `{0}` has non-list acceptance criteria.".format(title))
+    dependencies = task_input.get("dependencies") or []
+    if not isinstance(dependencies, list):
+        raise ValueError("bootstrap task `{0}` has non-list dependencies.".format(title))
+
+    work_item = WorkItem(
+        id=work_id,
+        title=title,
+        description=str(task_input.get("description") or title),
+        kind=str(task_input.get("kind") or "feature"),
+        status=str(task_input.get("status") or "needs_triage"),
+        execution=str(task_input.get("execution") or "afk_safe"),
+        module=task_input.get("module"),
+        planning=planning,
+        prd=task_input.get("prd"),
+        acceptance_criteria=[str(item) for item in acceptance],
+        dependencies=[str(item) for item in dependencies],
+        risk=str(task_input.get("risk") or "medium"),
+        created_at=created_at,
+        updated_at=now,
+    )
+    return work_item, work_id, existed
+
+
 def git_head_available(repo_root: Path) -> bool:
     result = run_git(repo_root, ["rev-parse", "--verify", "HEAD"])
     return result.returncode == 0
@@ -1362,6 +1524,13 @@ def resolve_review_packet_path(coordination_root: Path, target: str) -> Optional
         if review.id in aliases or review.work_id == target:
             return candidate
     return None
+
+
+def load_work_item(path: Path):
+    from agent_mesh.state.models import WorkItem
+    from agent_mesh.state.storage import load_model
+
+    return load_model(path, WorkItem)
 
 
 def reconcile_completed_review_packets(coordination_root: Path, work_id: Optional[str] = None) -> list[str]:

@@ -80,7 +80,7 @@ Responsibilities:
 - Break work into vertical, independently reviewable tasks.
 - Mark each task as AFK-safe, HITL, blocked, or needs-info.
 - Add dependencies and acceptance criteria.
-- Create local `.agentic/work/*.json` items.
+- Persist normalized work items through `mesh bootstrap-tasks`.
 - Optionally export to GitHub Issues or Linear in future versions.
 
 ## 5. /triage

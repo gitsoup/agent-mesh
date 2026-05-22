@@ -1,3 +1,4 @@
+import io
 import os
 import subprocess
 import json
@@ -7,6 +8,13 @@ from agent_mesh.cli import _bootstrap_project_json, app, derive_project_key
 
 
 def run_cli(args, capsys):
+    exit_code = app(args)
+    output = capsys.readouterr()
+    return exit_code, output.out
+
+
+def run_cli_with_stdin(args, stdin_text: str, capsys, monkeypatch):
+    monkeypatch.setattr("sys.stdin", io.StringIO(stdin_text))
     exit_code = app(args)
     output = capsys.readouterr()
     return exit_code, output.out
@@ -1928,6 +1936,77 @@ def test_doctor_emits_adapter_install_hint_for_missing_configured_adapter(
     assert exit_code == 1
     assert "Missing adapter artifact directory for codex: .agents/skills" in output
     assert "TIP: Run: mesh adapter install codex" in output
+
+
+def test_bootstrap_tasks_creates_normalized_work_items_from_stdin(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    repo_root = init_repo(tmp_path, monkeypatch, capsys)
+    payload = json.dumps(
+        {
+            "tasks": [
+                {
+                    "title": "Map existing auth flows",
+                    "description": "Inspect current auth boundaries and identify missing tests.",
+                    "kind": "research",
+                    "module": "auth",
+                    "acceptance_criteria": ["Document current auth entry points"],
+                },
+                {
+                    "id": "APP-9",
+                    "title": "Create adoption checklist",
+                    "status": "ready",
+                    "execution": "hitl",
+                    "risk": "low",
+                    "planning": {"provider": "linear", "external_id": "MESH-9"},
+                },
+            ]
+        }
+    )
+
+    exit_code, output = run_cli_with_stdin(["bootstrap-tasks"], payload, capsys, monkeypatch)
+
+    assert exit_code == 0
+    assert "Bootstrapped 2 tasks (2 created, 0 updated)." in output
+    work_one = json.loads((repo_root / ".agentic/work/APP-1.json").read_text(encoding="utf-8"))
+    work_two = json.loads((repo_root / ".agentic/work/APP-9.json").read_text(encoding="utf-8"))
+    assert work_one["title"] == "Map existing auth flows"
+    assert work_one["status"] == "needs_triage"
+    assert work_one["planning"]["provider"] == "local"
+    assert work_two["planning"]["provider"] == "linear"
+    assert work_two["planning"]["external_id"] == "MESH-9"
+    assert (repo_root / "dist/mesh-dashboard/index.html").exists()
+
+
+def test_bootstrap_tasks_updates_existing_work_item_from_input_file(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    repo_root = init_repo(tmp_path, monkeypatch, capsys)
+    run_cli(["task", "add", "Implement auth endpoint", "--module", "api"], capsys)
+    payload_path = repo_root / "bootstrap.json"
+    payload_path.write_text(
+        json.dumps(
+            [
+                {
+                    "id": "APP-1",
+                    "title": "Implement auth endpoint",
+                    "description": "Expanded scope and adoption notes.",
+                    "status": "ready",
+                    "dependencies": ["APP-2"],
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code, output = run_cli(["bootstrap-tasks", "--input", str(payload_path)], capsys)
+
+    assert exit_code == 0
+    assert "Bootstrapped 1 tasks (0 created, 1 updated)." in output
+    work_item = json.loads((repo_root / ".agentic/work/APP-1.json").read_text(encoding="utf-8"))
+    assert work_item["description"] == "Expanded scope and adoption notes."
+    assert work_item["status"] == "ready"
+    assert work_item["dependencies"] == ["APP-2"]
 
 
 def test_opencode_skill_list_shows_installed(tmp_path: Path, monkeypatch, capsys) -> None:

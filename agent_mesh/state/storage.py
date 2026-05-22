@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 from tempfile import NamedTemporaryFile
-from typing import Any, Iterable, List, Type, TypeVar
+from typing import Any, Callable, Iterable, List, Type, TypeVar
 
 from pydantic import BaseModel
 
@@ -59,6 +60,19 @@ def atomic_write_json(path: Path, payload: Any) -> None:
         handle.write("\n")
         temp_path = Path(handle.name)
     temp_path.replace(path)
+
+
+def atomic_create_json(path: Path, payload: Any) -> None:
+    """Create a JSON file exactly once, failing if the path already exists."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, indent=2)
+            handle.write("\n")
+    except Exception:
+        Path(path).unlink(missing_ok=True)
+        raise
 
 
 def save_model_json(path: Path, model: BaseModel) -> None:
@@ -132,7 +146,7 @@ def refresh_claim_last_seen(repo_root: Path, cwd: Path) -> None:
 
 
 def next_work_item_id(repo_root: Path, project_key: str) -> str:
-    prefix = "{0}-".format(project_key)
+    prefix = f"{project_key}-"
     numbers = []
     for work_item in list_work_items(repo_root):
         if work_item.id.startswith(prefix):
@@ -140,4 +154,28 @@ def next_work_item_id(repo_root: Path, project_key: str) -> str:
                 numbers.append(int(work_item.id.split("-")[-1]))
             except ValueError:
                 continue
-    return "{0}-{1}".format(project_key, max(numbers, default=0) + 1)
+    return f"{project_key}-{max(numbers, default=0) + 1}"
+
+
+def create_work_item_with_unique_id(
+    repo_root: Path,
+    project_key: str,
+    build_item: Callable[[str], T],
+    *,
+    max_attempts: int = 1000,
+) -> tuple[T, Path]:
+    """Allocate a sequential work ID by exclusive file creation and retry.
+
+    This keeps `mesh task add` safe under concurrent writers without requiring
+    a separate long-lived lock file.
+    """
+    for _ in range(max_attempts):
+        work_id = next_work_item_id(repo_root, project_key)
+        work_item = build_item(work_id)
+        path = repo_root / ".agentic/work" / f"{work_id}.json"
+        try:
+            atomic_create_json(path, work_item.model_dump())
+        except FileExistsError:
+            continue
+        return work_item, path
+    raise RuntimeError("failed to allocate a unique work item ID after repeated retries")

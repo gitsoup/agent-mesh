@@ -196,6 +196,8 @@ Generic         AGENTS.md + .agentic/workflows only
 - Keep cloud execution disabled unless explicitly configured.
 - Validate all JSON/TOML state before writing.
 - Use atomic writes where possible.
+- `mesh task add` should allocate work item IDs via exclusive file creation and
+  retry so concurrent creators cannot overwrite or duplicate task IDs.
 - Avoid writing over existing user files unless `--force` is supplied.
 - Keep machine-local paths and runtime-local coordination details off the durable
   repo contract on `main` whenever possible.

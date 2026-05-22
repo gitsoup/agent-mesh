@@ -753,34 +753,34 @@ def adapter_install_hints_from_errors(errors: Iterable[str]) -> List[str]:
 def handle_task_add(args: argparse.Namespace) -> int:
     from agent_mesh.config import load_project_config
     from agent_mesh.state.models import ProviderRef, WorkItem
-    from agent_mesh.state.storage import next_work_item_id, resolve_repo_root, save_model_json
+    from agent_mesh.state.storage import create_work_item_with_unique_id, resolve_repo_root
 
     repo_root = resolve_repo_root(Path.cwd())
     config = load_project_config(repo_root)
-    work_id = next_work_item_id(repo_root, config.project_key)
-    now = utc_now()
-
     description = args.description or args.title
     acceptance = args.acceptance or ["Define task-specific acceptance criteria."]
-    work_item = WorkItem(
-        id=work_id,
-        title=args.title,
-        description=description,
-        kind=args.kind,
-        status=args.status,
-        execution=args.execution,
-        module=args.module,
-        planning=ProviderRef(provider=config.planning.provider),
-        prd=None,
-        acceptance_criteria=acceptance,
-        dependencies=[],
-        risk=args.risk,
-        created_at=now,
-        updated_at=now,
-    )
-    path = repo_root / ".agentic/work" / "{0}.json".format(work_id)
-    save_model_json(path, work_item)
-    emit("Created task {0}".format(work_id))
+
+    def build_work_item(work_id: str) -> WorkItem:
+        now = utc_now()
+        return WorkItem(
+            id=work_id,
+            title=args.title,
+            description=description,
+            kind=args.kind,
+            status=args.status,
+            execution=args.execution,
+            module=args.module,
+            planning=ProviderRef(provider=config.planning.provider),
+            prd=None,
+            acceptance_criteria=acceptance,
+            dependencies=[],
+            risk=args.risk,
+            created_at=now,
+            updated_at=now,
+        )
+
+    work_item, _ = create_work_item_with_unique_id(repo_root, config.project_key, build_work_item)
+    emit("Created task {0}".format(work_item.id))
     return 0
 
 

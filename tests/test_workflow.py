@@ -1075,6 +1075,44 @@ def test_merge_removes_task_worktree(tmp_path: Path, monkeypatch, capsys) -> Non
     assert (coordination_root / ".agentic/claims/archive/APP-1.json").exists()
 
 
+def test_merge_returns_lane_to_idle_and_keeps_worktree(tmp_path: Path, monkeypatch, capsys) -> None:
+    repo_root = init_real_repo(tmp_path, monkeypatch, capsys, lanes=1)
+    run_cli(["task", "add", "Implement auth endpoint", "--module", "api"], capsys)
+    run_cli(["claim", "APP-1", "--agent", "codex", "--role", "implementer", "--no-push"], capsys)
+
+    coordination_root = repo_root.parent / "{0}-mesh-state".format(repo_root.name)
+    config = json.loads((repo_root / ".agentic/project.json").read_text(encoding="utf-8"))
+    lane = config["coordination"]["lanes"][0]
+    claim = json.loads((coordination_root / ".agentic/claims/APP-1.json").read_text(encoding="utf-8"))
+    worktree_path = Path(claim["worktree"])
+
+    monkeypatch.chdir(worktree_path)
+    run_cli(["pr", "--dry-run", "--work-id", "APP-1"], capsys)
+    monkeypatch.chdir(repo_root)
+
+    exit_code, output = run_cli(["merge", "APP-1", "--no-push", "--skip-merge-check"], capsys)
+
+    assert exit_code == 0
+    assert "Returned lane to base branch: wt/{0}".format(lane["workspace_id"]) in output
+    assert "Reset lane worktree to " in output
+    assert worktree_path.exists()
+    assert not (coordination_root / ".agentic/claims/APP-1.json").exists()
+    assert (coordination_root / ".agentic/claims/archive/APP-1.json").exists()
+
+    branch_result = subprocess.run(
+        ["git", "branch", "--show-current"],
+        cwd=worktree_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert branch_result.stdout.strip() == "wt/{0}".format(lane["workspace_id"])
+
+    lane_list_exit, lane_list_output = run_cli(["lane", "list"], capsys)
+    assert lane_list_exit == 0
+    assert "{0}\tidle\twt/{0}".format(lane["workspace_id"]) in lane_list_output
+
+
 def test_merge_skips_worktree_removal_when_already_absent(tmp_path: Path, monkeypatch, capsys) -> None:
     repo_root = tmp_path / "demo-repo"
     repo_root.mkdir(parents=True)
@@ -1239,7 +1277,7 @@ def test_merge_blocks_on_coordination_worktree(tmp_path: Path, monkeypatch, caps
     exit_code, output = run_cli(["merge", "APP-1", "--no-push", "--skip-merge-check"], capsys)
 
     assert exit_code == 1
-    assert "refusing to remove" in output
+    assert "refusing to modify" in output
     assert coordination_path.exists()
 
 
@@ -1303,6 +1341,67 @@ def test_merge_discard_uncommitted_proceeds_and_rebuilds_dashboard(tmp_path: Pat
     assert "Built dashboard" in output
 
 
+def test_merge_discard_uncommitted_returns_lane_to_idle(tmp_path: Path, monkeypatch, capsys) -> None:
+    repo_root = init_real_repo(tmp_path, monkeypatch, capsys, lanes=1)
+    run_cli(["task", "add", "Implement auth endpoint", "--module", "api"], capsys)
+    run_cli(["claim", "APP-1", "--agent", "codex", "--role", "implementer", "--no-push"], capsys)
+
+    coordination_root = repo_root.parent / "{0}-mesh-state".format(repo_root.name)
+    config = json.loads((repo_root / ".agentic/project.json").read_text(encoding="utf-8"))
+    lane = config["coordination"]["lanes"][0]
+    claim = json.loads((coordination_root / ".agentic/claims/APP-1.json").read_text(encoding="utf-8"))
+    worktree_path = Path(claim["worktree"])
+
+    monkeypatch.chdir(worktree_path)
+    run_cli(["pr", "--dry-run", "--work-id", "APP-1"], capsys)
+    monkeypatch.chdir(repo_root)
+
+    (worktree_path / "dirty.txt").write_text("unfinished\n", encoding="utf-8")
+
+    exit_code, output = run_cli(
+        ["merge", "APP-1", "--no-push", "--skip-merge-check", "--discard-uncommitted"], capsys
+    )
+
+    assert exit_code == 0
+    assert "--discard-uncommitted" in output
+    assert worktree_path.exists()
+    branch_result = subprocess.run(
+        ["git", "branch", "--show-current"],
+        cwd=worktree_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert branch_result.stdout.strip() == "wt/{0}".format(lane["workspace_id"])
+    assert not (worktree_path / "dirty.txt").exists()
+
+
+def test_merge_allows_immediate_reclaim_on_same_lane(tmp_path: Path, monkeypatch, capsys) -> None:
+    repo_root = init_real_repo(tmp_path, monkeypatch, capsys, lanes=1)
+    run_cli(["task", "add", "First task", "--module", "api"], capsys)
+    run_cli(["task", "add", "Second task", "--module", "api"], capsys)
+    run_cli(["claim", "APP-1", "--agent", "codex", "--role", "implementer", "--no-push"], capsys)
+
+    coordination_root = repo_root.parent / "{0}-mesh-state".format(repo_root.name)
+    first_claim = json.loads((coordination_root / ".agentic/claims/APP-1.json").read_text(encoding="utf-8"))
+    worktree_path = Path(first_claim["worktree"])
+
+    monkeypatch.chdir(worktree_path)
+    run_cli(["pr", "--dry-run", "--work-id", "APP-1"], capsys)
+    monkeypatch.chdir(repo_root)
+
+    merge_exit, merge_output = run_cli(["merge", "APP-1", "--no-push", "--skip-merge-check"], capsys)
+    assert merge_exit == 0, merge_output
+
+    claim_exit, claim_output = run_cli(
+        ["claim", "APP-2", "--agent", "codex", "--role", "implementer", "--no-push"],
+        capsys,
+    )
+    assert claim_exit == 0
+    assert "Worktree: {0}".format(worktree_path) in claim_output
+    assert "Workspace: {0}".format(first_claim["workspace_id"]) in claim_output
+
+
 def test_merge_from_inside_task_worktree_completes_dashboard_rebuild(tmp_path: Path, monkeypatch, capsys) -> None:
     # Regression test for MESH-15: mesh merge called from inside the task
     # worktree crashed on dashboard rebuild because Path.cwd() raised
@@ -1322,7 +1421,7 @@ def test_merge_from_inside_task_worktree_completes_dashboard_rebuild(tmp_path: P
     exit_code, output = run_cli(["merge", "APP-1", "--no-push", "--skip-merge-check"], capsys)
 
     assert exit_code == 0, output
-    assert "Removed worktree" in output
+    assert "Reset lane worktree to origin/main" in output or "Removed worktree" in output
     assert "Built dashboard" in output
     assert (coordination_root / ".agentic/claims/archive/APP-1.json").exists()
 

@@ -7,6 +7,8 @@ These workflows should be rendered into `.agentic/workflows/*.md` during `mesh i
 Before invoking a workflow, agents should inspect `AGENTS.md`,
 `.agentic/context/CONTEXT.md`, `.agentic/context/CONTEXT-MAP.md`,
 `.agentic/project.json` when present, and current coordination state.
+When the `mesh` CLI is installed, agents should invoke `mesh` directly rather
+than `uv run mesh`.
 
 Repo mode should be classified as:
 
@@ -73,6 +75,8 @@ Steps:
 3. Mark execution mode: `afk_safe`, `hitl`, `human_only`.
 4. Add dependencies.
 5. Write `.agentic/work/*.json`.
+6. When task candidates were derived by an agent from repo context, persist them
+   through `mesh bootstrap-tasks`.
 
 ## /triage
 

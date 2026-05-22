@@ -6,6 +6,8 @@ This workflow applies whenever `.agentic/` already exists with active or
 historical coordination state. Route here from the startup inspection in
 `AGENTS.md` when the repo is in `ongoing coordination` mode.
 
+When the `mesh` CLI is available, invoke `mesh` directly rather than `uv run mesh`.
+
 ## Startup inspection sequence
 
 When `.agentic/` already exists, inspect in this order before proposing or
@@ -16,6 +18,10 @@ starting any work:
 3. `.agentic/claims/` — active and stale claims; identify who owns what.
 4. `.agentic/reviews/` — open review packets awaiting feedback or merge.
 5. `.agentic/work/` — task statuses; identify `ready`, `in_progress`, and `done` items.
+
+If `.agentic/work/` has no meaningful work items yet, inspect available repo
+and planning sources, then persist initial tasks with `mesh bootstrap-tasks`
+before recommending implementation work.
 
 Do not propose `/setup` or overwrite existing state unless it is explicitly
 incomplete and the user requests adoption repair.
@@ -81,6 +87,7 @@ completed step, next intended action, and any open risks or blockers.
 3. Report a compact summary of current coordination state.
 4. If a handoff exists, surface the continuation note first.
 5. If an open review exists, resolve the workspace and prompt the user.
-6. Otherwise, recommend the best ready task or resume in-progress work.
-7. Proceed with `/claim`, `/implement`, `/pr`, `/review`, `/address`, `/merge`,
+6. If no meaningful work items exist yet, bootstrap them before continuing.
+7. Otherwise, recommend the best ready task or resume in-progress work.
+8. Proceed with `/claim`, `/implement`, `/pr`, `/review`, `/address`, `/merge`,
    or `/handoff` as appropriate.

@@ -16,7 +16,7 @@ Inspect these signals first, in order:
 2. `.agentic/context/CONTEXT.md`
 3. `.agentic/context/CONTEXT-MAP.md`
 4. `.agentic/project.json` if present
-5. Current coordination state via `mesh status` when the CLI is available, otherwise inspect `.agentic/work/`, `.agentic/claims/`, `.agentic/reviews/`, and `.agentic/handoffs/`
+5. Current coordination state via the installed `mesh status` command when the CLI is available. Do not wrap Mesh commands in `uv run`; invoke `mesh` directly. If the CLI is unavailable, inspect `.agentic/work/`, `.agentic/claims/`, `.agentic/reviews/`, and `.agentic/handoffs/`
 
 Route into one of these modes:
 
@@ -31,6 +31,7 @@ Guardrails:
 - Prefer the most coordinated mode already supported by repo state. If `.agentic/` is present, treat the repo as ongoing coordination unless the state is clearly incomplete and the user wants adoption repair.
 - In `ongoing coordination` mode, ambiguous execution requests such as `implement`, `continue`, `what next`, `work on this`, or `pick the next task` must be resolved against Agent Mesh coordination state first, not the most recent conversational subtopic.
 - For those ambiguous execution requests, inspect `.agentic/work/`, `.agentic/claims/`, `.agentic/reviews/`, and `.agentic/handoffs/` before proposing or starting work unless the user explicitly names a narrower scope.
+- If the repo is Mesh-enabled but `.agentic/work/` has no meaningful work items yet, inspect available repo and planning sources, then persist initial tasks with `mesh bootstrap-tasks` before recommending implementation work.
 - Claims should use a dedicated worktree and task branch unless the project explicitly disables worktree isolation.
 - Worktree names should follow reusable workspace or lane identity; branch names should remain task-oriented.
 - If a claim already exists, resume it explicitly or take it over when it is stale; do not delete claim files as a normal recovery mechanism.

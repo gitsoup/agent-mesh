@@ -1,8 +1,9 @@
+import os
 import subprocess
 import json
 from pathlib import Path
 
-from agent_mesh.cli import app
+from agent_mesh.cli import app, derive_project_key
 
 
 def run_cli(args, capsys):
@@ -24,11 +25,8 @@ def init_repo(tmp_path: Path, monkeypatch, capsys) -> Path:
             "APP",
             "--provider",
             "local",
-            "--adapters",
-            "generic,codex,claude",
             "--worktree-policy",
             "off",
-            "--yes",
         ],
         capsys,
     )
@@ -66,17 +64,38 @@ def init_real_repo(tmp_path: Path, monkeypatch, capsys, *, lanes: int = 0) -> Pa
         "APP",
         "--provider",
         "local",
-        "--adapters",
-        "generic,codex,claude",
         "--worktree-policy",
         "required",
-        "--yes",
     ]
     if lanes:
         cli_args += ["--lanes", str(lanes)]
     exit_code, output = run_cli(cli_args, capsys)
     assert exit_code == 0
     assert "Initialized Agent Mesh" in output
+    return repo_root
+
+
+def init_real_repo_without_identity(tmp_path: Path, monkeypatch) -> Path:
+    repo_root = tmp_path / "demo-repo"
+    repo_root.mkdir(parents=True)
+    subprocess.run(["git", "init", "-b", "main"], cwd=repo_root, check=True, capture_output=True)
+    (repo_root / "README.md").write_text("demo\n", encoding="utf-8")
+    env = {
+        **os.environ,
+        "GIT_AUTHOR_NAME": "Agent Mesh Tests",
+        "GIT_AUTHOR_EMAIL": "mesh@example.com",
+        "GIT_COMMITTER_NAME": "Agent Mesh Tests",
+        "GIT_COMMITTER_EMAIL": "mesh@example.com",
+    }
+    subprocess.run(["git", "add", "README.md"], cwd=repo_root, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "initial"],
+        cwd=repo_root,
+        check=True,
+        capture_output=True,
+        env=env,
+    )
+    monkeypatch.chdir(repo_root)
     return repo_root
 
 
@@ -96,15 +115,28 @@ def test_init_creates_agentic_scaffold(tmp_path: Path, monkeypatch, capsys) -> N
     assert "claim_stale_after_minutes" in ongoing
     assert "handoff" in ongoing
     assert (repo_root / ".agentic/skills/claim/SKILL.md").exists()
-    assert (repo_root / ".agents/skills/claim/SKILL.md").exists()
-    assert (repo_root / ".claude/skills/claim/SKILL.md").exists()
     assert (repo_root / ".github/workflows/agent-mesh-status.yml").exists()
-    assert (repo_root / ".agents/skills/claim/SKILL.md").read_text(encoding="utf-8").startswith(
-        "---\nname: claim\n"
-    )
-    assert (repo_root / ".claude/skills/claim/SKILL.md").read_text(encoding="utf-8").startswith(
-        "---\nname: claim\n"
-    )
+    assert project["adapters"] == ["generic"]
+
+
+def test_derive_project_key_prefers_meaningful_repo_tokens() -> None:
+    assert derive_project_key("agent-mesh") == "MESH"
+    assert derive_project_key("billing-api") == "BILL"
+    assert derive_project_key("user-service") == "USER"
+    assert derive_project_key("mesh") == "MESH"
+    assert derive_project_key("app") == "APP"
+
+
+def test_init_outside_git_repo_returns_friendly_error(tmp_path: Path, monkeypatch, capsys) -> None:
+    outside = tmp_path / "outside"
+    outside.mkdir(parents=True)
+    monkeypatch.chdir(outside)
+
+    exit_code, output = run_cli(["init"], capsys)
+
+    assert exit_code == 1
+    assert "`mesh init` must be run inside a git repository" in output
+    assert "git init" in output
 
 
 def test_init_rerun_skips_existing_files_without_force(tmp_path: Path, monkeypatch, capsys) -> None:
@@ -121,11 +153,8 @@ def test_init_rerun_skips_existing_files_without_force(tmp_path: Path, monkeypat
             "APP",
             "--provider",
             "local",
-            "--adapters",
-            "generic,codex,claude",
             "--worktree-policy",
             "off",
-            "--yes",
         ],
         capsys,
     )
@@ -139,6 +168,7 @@ def test_skill_list_shows_adapter_install_status_in_configured_repo(
     tmp_path: Path, monkeypatch, capsys
 ) -> None:
     repo_root = init_repo(tmp_path, monkeypatch, capsys)
+    run_cli(["adapter", "install", "codex,claude"], capsys)
 
     exit_code, output = run_cli(["skill", "list"], capsys)
 
@@ -159,6 +189,7 @@ def test_skill_list_reports_missing_codex_wrapper_in_configured_repo(
     tmp_path: Path, monkeypatch, capsys
 ) -> None:
     repo_root = init_repo(tmp_path, monkeypatch, capsys)
+    run_cli(["adapter", "install", "codex,claude"], capsys)
     (repo_root / ".agents/skills/claim/SKILL.md").unlink()
 
     exit_code, output = run_cli(["skill", "list"], capsys)
@@ -228,7 +259,7 @@ def test_doctor_status_and_task_lifecycle(tmp_path: Path, monkeypatch, capsys) -
     assert "Claims: 1" in output
     assert "APP-1: codex [active] on feat/APP-1-implement-auth-endpoint" in output
     assert "Built dashboard" in output
-    assert (repo_root / ".agentic/dashboard/index.html").exists()
+    assert (repo_root / "dist/mesh-dashboard/index.html").exists()
 
     exit_code, output = run_cli(["pr", "--dry-run", "--work-id", "APP-1"], capsys)
     assert exit_code == 0
@@ -247,9 +278,13 @@ def test_doctor_status_and_task_lifecycle(tmp_path: Path, monkeypatch, capsys) -
     exit_code, output = run_cli(["dashboard", "build"], capsys)
     assert exit_code == 0
     assert "Built dashboard" in output
-    dashboard = repo_root / ".agentic/dashboard/index.html"
+    dashboard = repo_root / "dist/mesh-dashboard/index.html"
     assert dashboard.exists()
-    assert "Agent Mesh" in dashboard.read_text(encoding="utf-8")
+    html = dashboard.read_text(encoding="utf-8")
+    assert "Agent Mesh dashboard" in html
+    assert "Task Explorer" in html
+    assert "task-search" in html
+    assert "sort-filter" in html
 
 
 def test_status_skips_dashboard_when_disabled_in_config(tmp_path: Path, monkeypatch, capsys) -> None:
@@ -265,12 +300,9 @@ def test_status_skips_dashboard_when_disabled_in_config(tmp_path: Path, monkeypa
             "APP",
             "--provider",
             "local",
-            "--adapters",
-            "generic,codex,claude",
             "--worktree-policy",
             "off",
             "--no-dashboard",
-            "--yes",
         ],
         capsys,
     )
@@ -280,7 +312,7 @@ def test_status_skips_dashboard_when_disabled_in_config(tmp_path: Path, monkeypa
     exit_code, output = run_cli(["status"], capsys)
     assert exit_code == 0
     assert "Built dashboard" not in output
-    assert not (repo_root / ".agentic/dashboard/index.html").exists()
+    assert not (repo_root / "dist/mesh-dashboard/index.html").exists()
 
 
 def test_status_skip_dashboard_rebuild_flag(tmp_path: Path, monkeypatch, capsys) -> None:
@@ -289,7 +321,7 @@ def test_status_skip_dashboard_rebuild_flag(tmp_path: Path, monkeypatch, capsys)
     exit_code, output = run_cli(["status", "--skip-dashboard-rebuild"], capsys)
     assert exit_code == 0
     assert "Built dashboard" not in output
-    assert not (repo_root / ".agentic/dashboard/index.html").exists()
+    assert not (repo_root / "dist/mesh-dashboard/index.html").exists()
 
 
 def test_claim_creates_dedicated_worktree_when_required(tmp_path: Path, monkeypatch, capsys) -> None:
@@ -327,11 +359,8 @@ def test_claim_creates_dedicated_worktree_when_required(tmp_path: Path, monkeypa
             "APP",
             "--provider",
             "local",
-            "--adapters",
-            "generic,codex,claude",
             "--worktree-policy",
             "required",
-            "--yes",
         ],
         capsys,
     )
@@ -380,11 +409,14 @@ def test_claim_creates_dedicated_worktree_when_required(tmp_path: Path, monkeypa
 
 
 def test_claim_auto_selects_first_idle_lane(tmp_path: Path, monkeypatch, capsys) -> None:
+    from agent_mesh.topology import resolve_lane_worktree_path
+
     repo_root = init_real_repo(tmp_path, monkeypatch, capsys, lanes=2)
     assert run_cli(["task", "add", "Implement auth endpoint", "--module", "api"], capsys)[0] == 0
 
     config = json.loads((repo_root / ".agentic/project.json").read_text(encoding="utf-8"))
     first_lane = config["coordination"]["lanes"][0]
+    first_lane_path = resolve_lane_worktree_path(repo_root, first_lane["workspace_id"], config["coordination"]["worktree_root"])
     coordination_root = repo_root.parent / "{0}-mesh-state".format(repo_root.name)
 
     exit_code, output = run_cli(
@@ -393,15 +425,15 @@ def test_claim_auto_selects_first_idle_lane(tmp_path: Path, monkeypatch, capsys)
     )
     assert exit_code == 0
     assert "Workspace: {0}".format(first_lane["workspace_id"]) in output
-    assert "REQUIRED: cd {0}".format(first_lane["worktree_path"]) in output
+    assert "REQUIRED: cd {0}".format(first_lane_path) in output
 
     claim = json.loads((coordination_root / ".agentic/claims/APP-1.json").read_text(encoding="utf-8"))
     assert claim["workspace_id"] == first_lane["workspace_id"]
-    assert claim["worktree"] == first_lane["worktree_path"]
+    assert claim["worktree"] == str(first_lane_path)
 
     branch = subprocess.run(
         ["git", "branch", "--show-current"],
-        cwd=Path(first_lane["worktree_path"]),
+        cwd=first_lane_path,
         check=True,
         capture_output=True,
         text=True,
@@ -410,11 +442,14 @@ def test_claim_auto_selects_first_idle_lane(tmp_path: Path, monkeypatch, capsys)
 
 
 def test_claim_reuses_named_lane_worktree(tmp_path: Path, monkeypatch, capsys) -> None:
+    from agent_mesh.topology import resolve_lane_worktree_path
+
     repo_root = init_real_repo(tmp_path, monkeypatch, capsys, lanes=1)
     assert run_cli(["task", "add", "Implement auth endpoint", "--module", "api"], capsys)[0] == 0
 
     config = json.loads((repo_root / ".agentic/project.json").read_text(encoding="utf-8"))
     lane = config["coordination"]["lanes"][0]
+    lane_path = resolve_lane_worktree_path(repo_root, lane["workspace_id"], config["coordination"]["worktree_root"])
     coordination_root = repo_root.parent / "{0}-mesh-state".format(repo_root.name)
 
     exit_code, output = run_cli(
@@ -422,11 +457,11 @@ def test_claim_reuses_named_lane_worktree(tmp_path: Path, monkeypatch, capsys) -
         capsys,
     )
     assert exit_code == 0
-    assert "Worktree: {0}".format(lane["worktree_path"]) in output
+    assert "Worktree: {0}".format(lane_path) in output
 
     claim = json.loads((coordination_root / ".agentic/claims/APP-1.json").read_text(encoding="utf-8"))
     assert claim["workspace_id"] == lane["workspace_id"]
-    assert claim["worktree"] == lane["worktree_path"]
+    assert claim["worktree"] == str(lane_path)
 
 
 def test_claim_rejects_active_lane_via_workspace_id(tmp_path: Path, monkeypatch, capsys) -> None:
@@ -452,12 +487,14 @@ def test_claim_rejects_active_lane_via_workspace_id(tmp_path: Path, monkeypatch,
 
 
 def test_claim_recreates_missing_lane_worktree(tmp_path: Path, monkeypatch, capsys) -> None:
+    from agent_mesh.topology import resolve_lane_worktree_path
+
     repo_root = init_real_repo(tmp_path, monkeypatch, capsys, lanes=1)
     assert run_cli(["task", "add", "Implement auth endpoint", "--module", "api"], capsys)[0] == 0
 
     config = json.loads((repo_root / ".agentic/project.json").read_text(encoding="utf-8"))
     lane = config["coordination"]["lanes"][0]
-    lane_path = Path(lane["worktree_path"])
+    lane_path = resolve_lane_worktree_path(repo_root, lane["workspace_id"], config["coordination"]["worktree_root"])
     subprocess.run(["git", "worktree", "remove", "--force", str(lane_path)], cwd=repo_root, check=True, capture_output=True)
     assert not lane_path.exists()
 
@@ -497,12 +534,14 @@ def test_claim_errors_when_all_lanes_are_active(tmp_path: Path, monkeypatch, cap
 
 
 def test_claim_rejects_dirty_lane_worktree(tmp_path: Path, monkeypatch, capsys) -> None:
+    from agent_mesh.topology import resolve_lane_worktree_path
+
     repo_root = init_real_repo(tmp_path, monkeypatch, capsys, lanes=1)
     assert run_cli(["task", "add", "Implement auth endpoint", "--module", "api"], capsys)[0] == 0
 
     config = json.loads((repo_root / ".agentic/project.json").read_text(encoding="utf-8"))
     lane = config["coordination"]["lanes"][0]
-    lane_path = Path(lane["worktree_path"])
+    lane_path = resolve_lane_worktree_path(repo_root, lane["workspace_id"], config["coordination"]["worktree_root"])
     (lane_path / "scratch.txt").write_text("dirty\n", encoding="utf-8")
 
     exit_code, output = run_cli(
@@ -629,7 +668,6 @@ def test_init_creates_coordination_worktree_for_real_git_repo(
             "generic,codex,claude",
             "--worktree-policy",
             "required",
-            "--yes",
         ],
         capsys,
     )
@@ -649,6 +687,191 @@ def test_init_creates_coordination_worktree_for_real_git_repo(
         ).stdout.strip()
         == project["coordination"]["branch"]
     )
+
+
+def test_init_without_git_identity_leaves_actionable_pending_scaffold(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    repo_root = init_real_repo_without_identity(tmp_path, monkeypatch)
+
+    exit_code, output = run_cli(
+        [
+            "init",
+            "--project-name",
+            "demo",
+            "--project-key",
+            "APP",
+            "--provider",
+            "local",
+            "--worktree-policy",
+            "required",
+        ],
+        capsys,
+    )
+
+    assert exit_code == 0
+    assert "Coordination worktree created: mesh/state @" in output
+    assert "coordination scaffold is pending" in output
+    assert "run `mesh sync` to finalize it" in output
+
+    coordination_path = repo_root.parent / "{0}-mesh-state".format(repo_root.name)
+    head = subprocess.run(
+        ["git", "rev-parse", "--verify", "HEAD"],
+        cwd=coordination_path,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert head.returncode != 0
+
+
+def test_sync_finalizes_pending_coordination_scaffold_after_git_identity_is_configured(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    repo_root = init_real_repo_without_identity(tmp_path, monkeypatch)
+    run_cli(
+        [
+            "init",
+            "--project-name",
+            "demo",
+            "--project-key",
+            "APP",
+            "--provider",
+            "local",
+            "--worktree-policy",
+            "required",
+        ],
+        capsys,
+    )
+    subprocess.run(
+        ["git", "config", "user.email", "mesh@example.com"],
+        cwd=repo_root,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Agent Mesh Tests"],
+        cwd=repo_root,
+        check=True,
+        capture_output=True,
+    )
+
+    exit_code, output = run_cli(["sync"], capsys)
+
+    assert exit_code == 0
+    assert "Committed pending coordination scaffold" in output
+    assert "OK: Agent Mesh state is valid." in output
+
+    coordination_path = repo_root.parent / "{0}-mesh-state".format(repo_root.name)
+    head = subprocess.run(
+        ["git", "rev-parse", "--verify", "HEAD"],
+        cwd=coordination_path,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert head.returncode == 0
+    status = subprocess.run(
+        ["git", "status", "--short"],
+        cwd=coordination_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert status.stdout.strip() == ""
+
+
+def test_init_rerun_with_pending_coordination_scaffold_stays_actionable(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    repo_root = init_real_repo_without_identity(tmp_path, monkeypatch)
+    run_cli(
+        [
+            "init",
+            "--project-name",
+            "demo",
+            "--project-key",
+            "APP",
+            "--provider",
+            "local",
+            "--worktree-policy",
+            "required",
+        ],
+        capsys,
+    )
+
+    exit_code, output = run_cli(
+        [
+            "init",
+            "--project-name",
+            "demo",
+            "--project-key",
+            "APP",
+            "--provider",
+            "local",
+            "--worktree-policy",
+            "required",
+        ],
+        capsys,
+    )
+
+    assert exit_code == 0
+    assert "invalid" not in output
+    assert "Coordination worktree noop: mesh/state @" in output
+    assert "coordination scaffold is pending" in output
+
+
+def test_init_rerun_with_ready_coordination_worktree_skips_scaffold_commit_noise(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    repo_root = init_real_repo(tmp_path, monkeypatch, capsys)
+
+    exit_code, output = run_cli(
+        [
+            "init",
+            "--project-name",
+            "demo",
+            "--project-key",
+            "APP",
+            "--provider",
+            "local",
+            "--worktree-policy",
+            "required",
+        ],
+        capsys,
+    )
+
+    assert exit_code == 0
+    assert "Coordination worktree noop: mesh/state @" in output
+    assert "could not commit coordination scaffold" not in output
+
+
+def test_init_recovers_when_coordination_worktree_path_was_deleted_manually(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    repo_root = init_real_repo(tmp_path, monkeypatch, capsys)
+    coordination_path = repo_root.parent / "{0}-mesh-state".format(repo_root.name)
+    subprocess.run(["rm", "-rf", str(coordination_path)], check=True, capture_output=True)
+
+    exit_code, output = run_cli(
+        [
+            "init",
+            "--project-name",
+            "demo",
+            "--project-key",
+            "APP",
+            "--provider",
+            "local",
+            "--worktree-policy",
+            "required",
+        ],
+        capsys,
+    )
+
+    assert exit_code == 0
+    assert "Coordination worktree created: mesh/state @" in output
+    assert "failed to create coordination worktree" not in output
+    assert coordination_path.exists()
 
 
 def test_pr_dry_run_reports_review_packet_path_from_task_worktree(
@@ -687,7 +910,6 @@ def test_pr_dry_run_reports_review_packet_path_from_task_worktree(
             "generic,codex,claude",
             "--worktree-policy",
             "required",
-            "--yes",
         ],
         capsys,
     )
@@ -740,7 +962,6 @@ def test_sync_recreates_missing_coordination_worktree(tmp_path: Path, monkeypatc
             "generic,codex,claude",
             "--worktree-policy",
             "required",
-            "--yes",
         ],
         capsys,
     )
@@ -770,7 +991,7 @@ def test_coordination_worktree_uses_orphan_branch(tmp_path: Path, monkeypatch, c
 
     exit_code, _ = run_cli(
         ["init", "--project-name", "demo", "--project-key", "APP", "--provider", "local",
-         "--adapters", "generic,codex,claude", "--worktree-policy", "required", "--yes"],
+         "--adapters", "generic,codex,claude", "--worktree-policy", "required"],
         capsys,
     )
     assert exit_code == 0
@@ -1050,7 +1271,7 @@ def test_merge_removes_task_worktree(tmp_path: Path, monkeypatch, capsys) -> Non
 
     run_cli(
         ["init", "--project-name", "demo", "--project-key", "APP", "--provider", "local",
-         "--adapters", "generic,codex,claude", "--worktree-policy", "required", "--yes"],
+         "--adapters", "generic,codex,claude", "--worktree-policy", "required"],
         capsys,
     )
     run_cli(["task", "add", "Implement auth endpoint", "--module", "api"], capsys)
@@ -1159,7 +1380,7 @@ def test_merge_skips_worktree_removal_when_already_absent(tmp_path: Path, monkey
 
     run_cli(
         ["init", "--project-name", "demo", "--project-key", "APP", "--provider", "local",
-         "--adapters", "generic,codex,claude", "--worktree-policy", "required", "--yes"],
+         "--adapters", "generic,codex,claude", "--worktree-policy", "required"],
         capsys,
     )
     run_cli(["task", "add", "Implement auth endpoint", "--module", "api"], capsys)
@@ -1293,7 +1514,7 @@ def test_merge_blocks_on_coordination_worktree(tmp_path: Path, monkeypatch, caps
 
     run_cli(
         ["init", "--project-name", "demo", "--project-key", "APP", "--provider", "local",
-         "--adapters", "generic,codex,claude", "--worktree-policy", "required", "--yes"],
+         "--adapters", "generic,codex,claude", "--worktree-policy", "required"],
         capsys,
     )
     run_cli(["task", "add", "Implement auth endpoint", "--module", "api"], capsys)
@@ -1326,7 +1547,7 @@ def _init_real_git_repo(tmp_path, monkeypatch, capsys, worktree_policy="required
     monkeypatch.chdir(repo_root)
     run_cli(
         ["init", "--project-name", "demo", "--project-key", "APP", "--provider", "local",
-         "--adapters", "generic,codex,claude", "--worktree-policy", worktree_policy, "--yes"],
+         "--adapters", "generic,codex,claude", "--worktree-policy", worktree_policy],
         capsys,
     )
     return repo_root
@@ -1493,15 +1714,69 @@ def test_dashboard_escapes_html_in_task_fields(tmp_path: Path, monkeypatch, caps
     exit_code, output = run_cli(["dashboard", "build"], capsys)
     assert exit_code == 0
 
-    html = (repo_root / ".agentic/dashboard/index.html").read_text(encoding="utf-8")
+    html = (repo_root / "dist/mesh-dashboard/index.html").read_text(encoding="utf-8")
     assert '<script>alert(' not in html
-    assert "&lt;script&gt;" in html
-    assert "&amp;" in html
-    assert "&quot;quoted&quot;" in html
-    assert "&lt;mod&gt;" in html
+    assert "\\u003cscript\\u003e" in html
+    assert "\\u0026" in html
+    assert '\\"quoted\\"' in html
+    assert "\\u003cmod\\u003e" in html
 
 
-def test_init_with_opencode_adapter_creates_opencode_json(tmp_path: Path, monkeypatch, capsys) -> None:
+def test_public_dashboard_build_redacts_sensitive_coordination_fields(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    repo_root = init_real_repo(tmp_path, monkeypatch, capsys)
+    run_cli(["task", "add", "Implement auth endpoint", "--module", "api"], capsys)
+    run_cli(
+        [
+            "claim",
+            "APP-1",
+            "--agent",
+            "codex",
+            "--role",
+            "implementer",
+            "--machine",
+            "private-box",
+            "--no-push",
+        ],
+        capsys,
+    )
+    coordination_root = repo_root.parent / "{0}-mesh-state".format(repo_root.name)
+    claim = json.loads((coordination_root / ".agentic/claims/APP-1.json").read_text(encoding="utf-8"))
+    monkeypatch.chdir(Path(claim["worktree"]))
+    run_cli(["pr", "--dry-run", "--work-id", "APP-1"], capsys)
+    monkeypatch.chdir(repo_root)
+
+    exit_code, output = run_cli(
+        ["dashboard", "build", "--public", "--output-dir", "dist/public-dashboard"],
+        capsys,
+    )
+    assert exit_code == 0
+    assert "Built public dashboard" in output
+
+    html_path = repo_root / "dist/public-dashboard/index.html"
+    data_path = repo_root / "dist/public-dashboard/dashboard-data.json"
+    assert html_path.exists()
+    assert data_path.exists()
+
+    html = html_path.read_text(encoding="utf-8")
+    assert "Public snapshot" in html
+    assert "Task Explorer" in html
+
+    payload = json.loads(data_path.read_text(encoding="utf-8"))
+    assert payload["meta"]["public"] is True
+    assert payload["tasks"][0]["title"] == "Implement auth endpoint"
+    assert payload["activeWork"][0]["title"] == "Implement auth endpoint"
+    assert payload["activeWork"][0]["agent"] is None
+    assert payload["activeWork"][0]["branch"] is None
+    assert payload["activeWork"][0]["workspaceId"] is None
+    assert payload["activeWork"][0]["worktree"] is None
+    assert payload["reviews"][0]["workId"] == "APP-1"
+    assert "private-box" not in data_path.read_text(encoding="utf-8")
+    assert "feat/APP-1-implement-auth-endpoint" not in data_path.read_text(encoding="utf-8")
+
+
+def test_adapter_install_opencode_creates_opencode_json(tmp_path: Path, monkeypatch, capsys) -> None:
     repo_root = tmp_path / "demo-repo"
     (repo_root / ".git").mkdir(parents=True)
     monkeypatch.chdir(repo_root)
@@ -1514,14 +1789,13 @@ def test_init_with_opencode_adapter_creates_opencode_json(tmp_path: Path, monkey
             "APP",
             "--provider",
             "local",
-            "--adapters",
-            "generic,opencode",
             "--worktree-policy",
             "off",
-            "--yes",
         ],
         capsys,
     )
+    assert exit_code == 0
+    exit_code, output = run_cli(["adapter", "install", "opencode"], capsys)
     assert exit_code == 0
     assert (repo_root / "opencode.json").exists()
     config = json.loads((repo_root / "opencode.json").read_text(encoding="utf-8"))
@@ -1543,14 +1817,12 @@ def test_adapter_install_opencode_is_idempotent(tmp_path: Path, monkeypatch, cap
             "APP",
             "--provider",
             "local",
-            "--adapters",
-            "generic,opencode",
             "--worktree-policy",
             "off",
-            "--yes",
         ],
         capsys,
     )
+    run_cli(["adapter", "install", "opencode"], capsys)
 
     config_before = json.loads((repo_root / "opencode.json").read_text(encoding="utf-8"))
 
@@ -1562,6 +1834,103 @@ def test_adapter_install_opencode_is_idempotent(tmp_path: Path, monkeypatch, cap
 
     config_after = json.loads((repo_root / "opencode.json").read_text(encoding="utf-8"))
     assert config_before == config_after
+
+
+def test_adapter_install_registers_adapter_in_project_config(tmp_path: Path, monkeypatch, capsys) -> None:
+    repo_root = tmp_path / "demo-repo"
+    (repo_root / ".git").mkdir(parents=True)
+    monkeypatch.chdir(repo_root)
+    exit_code, _ = run_cli(
+        [
+            "init",
+            "--project-name",
+            "demo",
+            "--project-key",
+            "APP",
+            "--provider",
+            "local",
+            "--adapters",
+            "generic",
+            "--worktree-policy",
+            "off",
+        ],
+        capsys,
+    )
+    assert exit_code == 0
+
+    project_before = json.loads((repo_root / ".agentic/project.json").read_text(encoding="utf-8"))
+    assert project_before["adapters"] == ["generic"]
+
+    exit_code, output = run_cli(["adapter", "install", "claude"], capsys)
+    assert exit_code == 0
+    assert "Installed adapter artifacts" in output
+
+    project_after = json.loads((repo_root / ".agentic/project.json").read_text(encoding="utf-8"))
+    assert project_after["adapters"] == ["generic", "claude"]
+
+
+def test_claim_emits_adapter_install_tip_for_detected_runtime(tmp_path: Path, monkeypatch, capsys) -> None:
+    repo_root = tmp_path / "demo-repo"
+    (repo_root / ".git").mkdir(parents=True)
+    monkeypatch.chdir(repo_root)
+    exit_code, _ = run_cli(
+        [
+            "init",
+            "--project-name",
+            "demo",
+            "--project-key",
+            "APP",
+            "--provider",
+            "local",
+            "--adapters",
+            "generic",
+            "--worktree-policy",
+            "off",
+        ],
+        capsys,
+    )
+    assert exit_code == 0
+
+    run_cli(["task", "add", "Implement auth endpoint", "--module", "api"], capsys)
+    exit_code, output = run_cli(
+        ["claim", "APP-1", "--agent", "claude-code", "--role", "implementer", "--no-push"],
+        capsys,
+    )
+    assert exit_code == 0
+    assert "TIP: detected claude runtime. To enable Mesh wrappers for this repo, run: mesh adapter install claude" in output
+
+
+def test_doctor_emits_adapter_install_hint_for_missing_configured_adapter(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    repo_root = tmp_path / "demo-repo"
+    (repo_root / ".git").mkdir(parents=True)
+    monkeypatch.chdir(repo_root)
+    exit_code, _ = run_cli(
+        [
+            "init",
+            "--project-name",
+            "demo",
+            "--project-key",
+            "APP",
+            "--provider",
+            "local",
+            "--adapters",
+            "generic",
+            "--worktree-policy",
+            "off",
+        ],
+        capsys,
+    )
+    assert exit_code == 0
+    project = json.loads((repo_root / ".agentic/project.json").read_text(encoding="utf-8"))
+    project["adapters"] = ["generic", "codex"]
+    (repo_root / ".agentic/project.json").write_text(json.dumps(project, indent=2) + "\n", encoding="utf-8")
+
+    exit_code, output = run_cli(["doctor"], capsys)
+    assert exit_code == 1
+    assert "Missing adapter artifact directory for codex: .agents/skills" in output
+    assert "TIP: Run: mesh adapter install codex" in output
 
 
 def test_opencode_skill_list_shows_installed(tmp_path: Path, monkeypatch, capsys) -> None:
@@ -1577,14 +1946,12 @@ def test_opencode_skill_list_shows_installed(tmp_path: Path, monkeypatch, capsys
             "APP",
             "--provider",
             "local",
-            "--adapters",
-            "generic,opencode",
             "--worktree-policy",
             "off",
-            "--yes",
         ],
         capsys,
     )
+    run_cli(["adapter", "install", "opencode"], capsys)
 
     exit_code, output = run_cli(["skill", "list"], capsys)
     assert exit_code == 0
@@ -1607,14 +1974,12 @@ def test_doctor_validates_opencode_config(tmp_path: Path, monkeypatch, capsys) -
             "APP",
             "--provider",
             "local",
-            "--adapters",
-            "generic,opencode",
             "--worktree-policy",
             "off",
-            "--yes",
         ],
         capsys,
     )
+    run_cli(["adapter", "install", "opencode"], capsys)
 
     (repo_root / "opencode.json").unlink()
 
@@ -1635,7 +2000,7 @@ def _setup_repo_with_claim(tmp_path: Path, monkeypatch, capsys, *, worktree_poli
     monkeypatch.chdir(repo_root)
     run_cli(
         ["init", "--project-name", "demo", "--project-key", "APP", "--provider", "local",
-         "--adapters", "generic,codex,claude", "--worktree-policy", worktree_policy, "--yes"],
+         "--adapters", "generic,codex,claude", "--worktree-policy", worktree_policy],
         capsys,
     )
     run_cli(["task", "add", "Implement auth endpoint", "--module", "api"], capsys)

@@ -183,7 +183,7 @@ def init_repo(
             "coordination_worktree": None,
             "claim_stale_after_minutes": claim_stale_after_minutes,
         },
-        dashboard={"enabled": dashboard, "output_dir": ".agentic/dashboard"},
+        dashboard={"enabled": dashboard, "output_dir": "dist/mesh-dashboard"},
     )
 
     # Config/definition directories always go to repo_root
@@ -205,9 +205,6 @@ def init_repo(
         state_root / ".agentic/reviews",
         state_root / ".agentic/handoffs",
     ]
-    if dashboard:
-        state_directories.append(state_root / ".agentic/dashboard")
-
     seen: set = set()
     for directory in config_directories + state_directories:
         if directory not in seen:
@@ -485,21 +482,23 @@ This repository uses Agent Mesh for local-first coordination.
 
 ## Working rules
 
-1. Read `.agentic/context/CONTEXT.md` and `.agentic/context/CONTEXT-MAP.md` first.
-2. Detect repo mode before choosing a workflow:
+1. If the `mesh` CLI is not installed locally yet, install Agent Mesh first, then run `mesh doctor`.
+2. Read `.agentic/context/CONTEXT.md` and `.agentic/context/CONTEXT-MAP.md` first.
+3. Detect repo mode before choosing a workflow:
    - `greenfield`: little or no durable product/code context yet → `/setup`, `/align`, `/to-prd`, `/to-tasks`
    - `brownfield adoption`: meaningful repo context exists, but Mesh state does not → `/setup`
    - `ongoing coordination`: `.agentic/` already exists with work/claim/review state → `/ongoing`
-3. Inspect `.agentic/project.json` and current coordination state before proposing `/setup` or `/claim`.
-4. Use `.agentic/workflows/*.md` as the canonical workflow definitions.
-5. Keep coordination state human-readable and reviewable.
-6. Claims should use a dedicated worktree and branch unless the project explicitly disables worktree isolation.
-7. Worktrees should be named by reusable workspace or lane identity, not by task ID.
-8. The shared root should stay on `{default_branch}`; live coordination state belongs on the `{coordination_branch}` branch in a dedicated coordination worktree.
-9. Stale claims should be resumed or explicitly taken over; safe takeover should keep the branch but allocate a new workspace by default.
-10. Do not implement claimed work from the shared root checkout when worktree isolation is enabled.
-11. Do not overwrite existing work without explicit confirmation.
-12. Prefer local-first flows; cloud runners are optional and future-facing.
+4. Inspect `.agentic/project.json` and current coordination state before proposing `/setup` or `/claim`.
+5. Use `.agentic/workflows/*.md` as the canonical workflow definitions.
+6. Install adapter-specific wrappers only when the active agent/runtime needs them.
+7. Keep coordination state human-readable and reviewable.
+8. Claims should use a dedicated worktree and branch unless the project explicitly disables worktree isolation.
+9. Worktrees should be named by reusable workspace or lane identity, not by task ID.
+10. The shared root should stay on `{default_branch}`; live coordination state belongs on the `{coordination_branch}` branch in a dedicated coordination worktree.
+11. Stale claims should be resumed or explicitly taken over; safe takeover should keep the branch but allocate a new workspace by default.
+12. Do not implement claimed work from the shared root checkout when worktree isolation is enabled.
+13. Do not overwrite existing work without explicit confirmation.
+14. Prefer local-first flows; cloud runners are optional and future-facing.
 """.format(
         project_name=project_name,
         default_branch="main",

@@ -77,13 +77,14 @@ Visibility layer    CLI status / TUI / static dashboard / PR comments
     sync/SKILL.md
   adapters/
     README.md
-  dashboard/
-    index.html
 AGENTS.md
 .github/
   workflows/
     agent-mesh-status.yml
     agent-mesh-review.yml optional future
+dist/
+  mesh-dashboard/
+    index.html
 ```
 
 ## 4. Internal package architecture
@@ -172,6 +173,8 @@ Cloudflare Workers/Queues/Workflows are suitable for future control-plane featur
 Canonical workflows and skills are stored in `.agentic/workflows` and `.agentic/skills`.
 
 Adapters generate tool-specific files.
+The durable Mesh contract should clone with the repo; adapter wrappers are
+runtime-specific overlays that can be installed later on demand.
 
 Examples:
 
@@ -194,3 +197,5 @@ Generic         AGENTS.md + .agentic/workflows only
 - Validate all JSON/TOML state before writing.
 - Use atomic writes where possible.
 - Avoid writing over existing user files unless `--force` is supplied.
+- Keep machine-local paths and runtime-local coordination details off the durable
+  repo contract on `main` whenever possible.

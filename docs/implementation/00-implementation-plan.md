@@ -63,7 +63,7 @@ Requirements:
 - Should create `AGENTS.md`.
 - Should create context files.
 - Should create canonical workflows and skills.
-- Should install selected adapters.
+- Should establish the shared repo contract first; adapter wrappers may be installed later on demand.
 
 ## Phase 3: CLI commands
 
@@ -98,6 +98,7 @@ Implement adapters:
 - windsurf
 
 Do not overfit unknown tool-specific config. It is okay for early adapters to generate AGENTS.md plus pointers to canonical workflows.
+Prefer lazy adapter activation over eager generation of every tool-specific wrapper during init.
 
 ## Phase 5: Dashboard
 
@@ -106,7 +107,7 @@ Implement static dashboard generation from `.agentic/work`, `.agentic/claims`, `
 Output:
 
 ```text
-.agentic/dashboard/index.html
+dist/mesh-dashboard/index.html
 ```
 
 Also generate GitHub Actions status workflow template.
@@ -143,8 +144,9 @@ In a temp directory:
 uv sync
 mkdir /tmp/demo-agent-mesh && cd /tmp/demo-agent-mesh
 git init
-mesh init --project-name demo --project-key APP --provider local --adapters generic,codex,claude --yes
+mesh init --project-name demo --project-key APP --provider local
 mesh doctor
+mesh adapter install codex
 mesh task add "Implement auth endpoint" --module api
 mesh task list
 mesh claim APP-1 --agent codex --role implementer --no-push

@@ -26,13 +26,13 @@ Use Pydantic models in implementation and JSON files in target repos.
     "coordination_worktree": null,
     "claim_stale_after_minutes": 120
   },
-  "adapters": ["generic", "codex", "claude"],
+  "adapters": ["generic"],
   "runner": {
     "default": "local_manual"
   },
   "dashboard": {
     "enabled": true,
-    "output_dir": ".agentic/dashboard"
+    "output_dir": "dist/mesh-dashboard"
   }
 }
 ```

@@ -18,6 +18,12 @@ Do not hand-author divergent versions for each tool. Generate them from template
 Adapter entrypoints should point agents to `AGENTS.md` first so repo-mode
 detection happens before a tool-specific skill or workflow is chosen.
 
+Adapters should be lazy-activated.
+The repo-level Mesh contract should exist after `mesh init`, while tool-specific
+wrapper files should be installed only when the active runtime actually needs
+them. Mesh commands may suggest `mesh adapter install <name>` when they detect a
+likely runtime and the corresponding wrapper files are missing.
+
 ## 3. Required adapters for v0.1
 
 ### generic
@@ -103,6 +109,9 @@ class Adapter(Protocol):
     def render_project_instructions(self, context: RenderContext) -> dict[Path, str]: ...
     def render_skills(self, context: RenderContext) -> dict[Path, str]: ...
 ```
+
+Detection should remain best-effort and safe. Missing adapter wrappers should
+produce actionable hints, not block core Mesh coordination commands by default.
 
 ## 5. Skill frontmatter
 

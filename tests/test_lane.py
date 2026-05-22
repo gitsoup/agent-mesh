@@ -22,7 +22,6 @@ def init_repo(tmp_path: Path, monkeypatch, capsys, lanes: int = 0) -> Path:
         "--project-name", "demo",
         "--project-key", "APP",
         "--worktree-policy", "off",
-        "--yes",
     ]
     if lanes:
         cli_args += ["--lanes", str(lanes)]
@@ -42,6 +41,8 @@ def test_init_no_lanes_stores_empty_lanes(tmp_path, monkeypatch, capsys):
 
 
 def test_init_with_lanes_stores_lane_metadata(tmp_path, monkeypatch, capsys):
+    from agent_mesh.topology import resolve_lane_worktree_path
+
     repo_root = init_repo(tmp_path, monkeypatch, capsys, lanes=2)
     config = load_config(repo_root)
     lanes = config["coordination"]["lanes"]
@@ -52,9 +53,9 @@ def test_init_with_lanes_stores_lane_metadata(tmp_path, monkeypatch, capsys):
     # workspace_id matches name
     for lane in lanes:
         assert lane["workspace_id"] == lane["name"]
-    # worktree paths are siblings of the repo root
     for lane in lanes:
-        path = Path(lane["worktree_path"])
+        assert lane.get("worktree_path") in (None, "")
+        path = resolve_lane_worktree_path(repo_root, lane["workspace_id"], config["coordination"]["worktree_root"])
         assert path.parent == repo_root.parent
 
 
@@ -66,7 +67,7 @@ def test_init_lanes_idempotent(tmp_path, monkeypatch, capsys):
     # Re-run init with --lanes 2: should add one more, not duplicate
     exit_code, _ = run_cli(
         ["init", "--project-name", "demo", "--project-key", "APP",
-         "--worktree-policy", "off", "--yes", "--lanes", "2"],
+         "--worktree-policy", "off", "--lanes", "2"],
         capsys,
     )
     assert exit_code == 0
@@ -78,7 +79,7 @@ def test_init_lanes_idempotent(tmp_path, monkeypatch, capsys):
     # Re-run init with --lanes 1: already have 2, nothing added
     exit_code, output = run_cli(
         ["init", "--project-name", "demo", "--project-key", "APP",
-         "--worktree-policy", "off", "--yes", "--lanes", "1"],
+         "--worktree-policy", "off", "--lanes", "1"],
         capsys,
     )
     assert exit_code == 0
@@ -157,7 +158,7 @@ def _init_real_git_repo(tmp_path, monkeypatch, capsys):
     monkeypatch.chdir(repo_root)
     exit_code, output = run_cli(
         ["init", "--project-name", "demo", "--project-key", "APP",
-         "--worktree-policy", "required", "--yes"],
+         "--worktree-policy", "required"],
         capsys,
     )
     assert exit_code == 0, output
@@ -165,17 +166,19 @@ def _init_real_git_repo(tmp_path, monkeypatch, capsys):
 
 
 def test_init_with_lanes_creates_actual_worktrees(tmp_path, monkeypatch, capsys):
+    from agent_mesh.topology import resolve_lane_worktree_path
+
     repo_root = _init_real_git_repo(tmp_path, monkeypatch, capsys)
 
     exit_code, output = run_cli(["init", "--project-name", "demo", "--project-key", "APP",
-                                  "--worktree-policy", "required", "--yes", "--lanes", "2"], capsys)
+                                  "--worktree-policy", "required", "--lanes", "2"], capsys)
     assert exit_code == 0
 
     config = load_config(repo_root)
     lanes = config["coordination"]["lanes"]
     assert len(lanes) == 2
     for lane in lanes:
-        path = Path(lane["worktree_path"])
+        path = resolve_lane_worktree_path(repo_root, lane["workspace_id"], config["coordination"]["worktree_root"])
         assert path.exists(), "lane worktree not created: {0}".format(path)
         assert (path / ".git").exists()
 
@@ -186,6 +189,8 @@ def test_init_with_lanes_creates_actual_worktrees(tmp_path, monkeypatch, capsys)
 
 
 def test_lane_add_with_worktree_policy_creates_worktree(tmp_path, monkeypatch, capsys):
+    from agent_mesh.topology import resolve_lane_worktree_path
+
     repo_root = _init_real_git_repo(tmp_path, monkeypatch, capsys)
 
     exit_code, output = run_cli(["lane", "add", "my-lane"], capsys)
@@ -193,7 +198,7 @@ def test_lane_add_with_worktree_policy_creates_worktree(tmp_path, monkeypatch, c
 
     config = load_config(repo_root)
     lane = next(l for l in config["coordination"]["lanes"] if l["name"] == "my-lane")
-    path = Path(lane["worktree_path"])
+    path = resolve_lane_worktree_path(repo_root, lane["workspace_id"], config["coordination"]["worktree_root"])
     assert path.exists()
     assert (path / ".git").exists()
 
@@ -217,7 +222,7 @@ def test_provision_lane_failure_not_registered(tmp_path, monkeypatch, capsys):
 
     exit_code, output = run_cli(
         ["init", "--project-name", "demo", "--project-key", "APP",
-         "--worktree-policy", "required", "--yes", "--lanes", "1"],
+         "--worktree-policy", "required", "--lanes", "1"],
         capsys,
     )
     # init succeeds (WARN emitted) but failed lane is NOT in registry

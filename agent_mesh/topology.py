@@ -57,6 +57,22 @@ def inspect_coordination_worktree(repo_root: Path, config: ProjectConfig) -> Coo
             detail="path exists but is not a git worktree",
         )
 
+    head = run_git_text(path, ["rev-parse", "--verify", "HEAD"])
+    if head is None:
+        if (path / ".agentic").exists():
+            return CoordinationWorktreeStatus(
+                branch=branch,
+                path=path,
+                state="pending_scaffold",
+                detail="coordination worktree is awaiting its initial scaffold commit",
+            )
+        return CoordinationWorktreeStatus(
+            branch=branch,
+            path=path,
+            state="invalid",
+            detail="coordination worktree has no valid HEAD",
+        )
+
     active_branch = run_git_text(path, ["branch", "--show-current"])
     if active_branch is None:
         return CoordinationWorktreeStatus(
@@ -121,6 +137,15 @@ def ensure_coordination_worktree(repo_root: Path, config: ProjectConfig) -> Coor
             state="ready",
         )
 
+    if status.state == "pending_scaffold":
+        return CoordinationRepairResult(
+            branch=branch,
+            path=path,
+            action="noop",
+            state="pending_scaffold",
+            detail=status.detail,
+        )
+
     if status.state == "missing":
         create_coordination_worktree(repo_root, config, path)
         return CoordinationRepairResult(
@@ -156,24 +181,46 @@ def ensure_coordination_worktree(repo_root: Path, config: ProjectConfig) -> Coor
 def create_coordination_worktree(repo_root: Path, config: ProjectConfig, path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     branch = config.coordination.branch
-    if branch_exists(repo_root, branch):
-        args = ["worktree", "add", str(path), branch]
-        result = subprocess.run(
-            ["git", *args],
-            cwd=repo_root,
-            check=False,
-            capture_output=True,
-            text=True,
-        )
-    else:
-        # Create orphan branch: no shared history with main
-        result = _create_orphan_coordination_worktree(repo_root, branch, path)
+    prune_stale_worktrees(repo_root)
+    result = _attempt_create_coordination_worktree(repo_root, branch, path)
+    if result.returncode != 0 and _is_stale_worktree_registration_error(result):
+        prune_stale_worktrees(repo_root)
+        result = _attempt_create_coordination_worktree(repo_root, branch, path)
 
     if result.returncode == 0:
         return
 
     detail = (result.stderr or result.stdout).strip()
     raise RuntimeError("failed to create coordination worktree: {0}".format(detail))
+
+
+def _attempt_create_coordination_worktree(
+    repo_root: Path, branch: str, path: Path
+) -> subprocess.CompletedProcess:
+    if branch_exists(repo_root, branch):
+        return subprocess.run(
+            ["git", "worktree", "add", str(path), branch],
+            cwd=repo_root,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    return _create_orphan_coordination_worktree(repo_root, branch, path)
+
+
+def prune_stale_worktrees(repo_root: Path) -> None:
+    subprocess.run(
+        ["git", "worktree", "prune"],
+        cwd=repo_root,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+
+def _is_stale_worktree_registration_error(result: subprocess.CompletedProcess) -> bool:
+    detail = (result.stderr or result.stdout).strip()
+    return "missing but already registered worktree" in detail
 
 
 _EMPTY_TREE_SHA = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
@@ -193,12 +240,18 @@ def _create_orphan_coordination_worktree(
     )
     if result.returncode == 0:
         # Create initial empty commit so the branch has a ref
-        subprocess.run(
+        commit = subprocess.run(
             ["git", "commit", "--allow-empty", "-m", "Initialize {0} coordination branch".format(branch)],
             cwd=path,
             check=False,
             capture_output=True,
+            text=True,
         )
+        if commit.returncode != 0:
+            detail = (commit.stderr or commit.stdout).strip()
+            if "Author identity unknown" in detail:
+                return result
+            return commit
         return result
 
     # Fallback for git < 2.36: use low-level plumbing — never touches the working directory
@@ -336,8 +389,14 @@ def resolve_lane_worktree_path(repo_root: Path, workspace_id: str, worktree_root
     return repo_root.parent / "{0}-{1}".format(repo_root.name, workspace_id)
 
 
-def inspect_lane_status(lane: LaneEntry) -> LaneStatus:
-    path = Path(lane.worktree_path)
+def resolve_lane_entry_path(repo_root: Path, lane: LaneEntry, worktree_root: Optional[str]) -> Path:
+    if lane.worktree_path:
+        return Path(lane.worktree_path)
+    return resolve_lane_worktree_path(repo_root, lane.workspace_id, worktree_root)
+
+
+def inspect_lane_status(repo_root: Path, lane: LaneEntry, worktree_root: Optional[str]) -> LaneStatus:
+    path = resolve_lane_entry_path(repo_root, lane, worktree_root)
     base_branch = "wt/{0}".format(lane.workspace_id)
 
     if not path.exists() or not (path / ".git").exists():

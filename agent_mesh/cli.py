@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import re
 import socket
 import subprocess
 from datetime import datetime, timedelta, timezone
@@ -22,6 +24,15 @@ except ModuleNotFoundError:  # pragma: no cover - exercised only in thin envs
 
 console = Console() if Console is not None else None
 SUPPORTED_ADAPTERS = ["generic", "claude", "codex", "cursor", "opencode", "pi", "windsurf"]
+RUNTIME_ADAPTER_ALIASES = {
+    "claude": "claude",
+    "claude-code": "claude",
+    "codex": "codex",
+    "cursor": "cursor",
+    "opencode": "opencode",
+    "pi": "pi",
+    "windsurf": "windsurf",
+}
 
 
 def emit(message: str) -> None:
@@ -55,9 +66,12 @@ def build_parser() -> argparse.ArgumentParser:
     init_parser.add_argument("--project-name")
     init_parser.add_argument("--project-key")
     init_parser.add_argument("--provider", default="local")
-    init_parser.add_argument("--adapters", default="generic")
+    init_parser.add_argument(
+        "--adapters",
+        default="generic",
+        help="Optional adapter wrappers to install during init. Defaults to generic; additional adapters can be installed later with `mesh adapter install`.",
+    )
     init_parser.add_argument("--force", action="store_true")
-    init_parser.add_argument("--yes", action="store_true")
     init_parser.add_argument("--dashboard", dest="dashboard", action="store_true", default=True)
     init_parser.add_argument("--no-dashboard", dest="dashboard", action="store_false")
     init_parser.add_argument(
@@ -165,6 +179,15 @@ def build_parser() -> argparse.ArgumentParser:
     dashboard_build_parser = dashboard_subparsers.add_parser(
         "build", help="Build a static dashboard."
     )
+    dashboard_build_parser.add_argument(
+        "--public",
+        action="store_true",
+        help="Build a stakeholder-safe static export with redacted coordination details.",
+    )
+    dashboard_build_parser.add_argument(
+        "--output-dir",
+        help="Override the output directory. Defaults to dist/public-dashboard for --public or the configured dashboard output dir otherwise.",
+    )
     dashboard_build_parser.set_defaults(func=handle_dashboard_build)
 
     sync_parser = subparsers.add_parser("sync", help="Refresh local status artifacts.")
@@ -192,6 +215,7 @@ def app(argv: Optional[Sequence[str]] = None) -> int:
             refresh_claim_last_seen(resolve_repo_root(Path.cwd()), Path.cwd())
         except Exception:
             pass
+    maybe_emit_runtime_adapter_tip(args)
     return int(args.func(args) or 0)
 
 
@@ -206,7 +230,14 @@ def handle_init(args: argparse.Namespace) -> int:
     from agent_mesh.state.storage import resolve_repo_root
     from agent_mesh.topology import ensure_coordination_worktree
 
-    repo_root = resolve_repo_root(Path.cwd())
+    try:
+        repo_root = resolve_repo_root(Path.cwd())
+    except FileNotFoundError:
+        emit(
+            "ERROR: `mesh init` must be run inside a git repository. "
+            "Clone a repo first, or run `git init` before initializing Mesh."
+        )
+        return 1
     project_name = args.project_name or repo_root.name
     project_key = args.project_key or derive_project_key(project_name)
     adapters = parse_csv(args.adapters)
@@ -222,6 +253,7 @@ def handle_init(args: argparse.Namespace) -> int:
 
     # Set up coordination worktree first so scaffold can write .agentic/ there
     coordination_root = None
+    coordination = None
     if args.worktree_policy != "off" and git_head_available(repo_root):
         try:
             # Bootstrap: write a minimal project.json to repo_root so
@@ -257,7 +289,13 @@ def handle_init(args: argparse.Namespace) -> int:
     emit("Initialized Agent Mesh in {0}".format(repo_root))
     emit("Created {0} files.".format(len(result.created)))
     emit("Skipped {0} existing files.".format(len(result.skipped)))
-    if coordination_root is not None and coordination_root != repo_root:
+    emit("Adapter wrappers can be added later with: mesh adapter install <adapter>")
+    if (
+        coordination_root is not None
+        and coordination_root != repo_root
+        and coordination is not None
+        and (coordination.action != "noop" or coordination.state == "pending_scaffold")
+    ):
         _commit_coordination_scaffold(coordination_root)
     # Restore pre-existing lanes and add new ones in a single write cycle.
     if existing_lanes or args.lanes > 0:
@@ -296,7 +334,7 @@ def _provision_lanes(repo_root: Path, target_count: int, worktree_policy: str, p
                 continue  # skip registration — don't pollute the lane registry with failed lanes
         else:
             path = resolve_lane_worktree_path(repo_root, workspace_id, config.coordination.worktree_root)
-        config.coordination.lanes.append(LaneEntry(name=workspace_id, workspace_id=workspace_id, worktree_path=str(path)))
+        config.coordination.lanes.append(LaneEntry(name=workspace_id, workspace_id=workspace_id))
         emit("Lane: {0} @ {1}".format(workspace_id, path))
     save_project_config(repo_root, config)
 
@@ -342,15 +380,15 @@ def _bootstrap_project_json(
         },
         "adapters": adapters,
         "runner": {"default": "local_manual"},
-        "dashboard": {"enabled": dashboard, "output_dir": ".agentic/dashboard"},
+        "dashboard": {"enabled": dashboard, "output_dir": "dist/mesh-dashboard"},
     })
 
 
-def _commit_coordination_scaffold(coordination_root: Path) -> None:
+def _commit_coordination_scaffold(coordination_root: Path) -> bool:
     """Commit the initial .agentic/ state scaffold to the coordination branch.
 
-    Emits a warning if the commit fails — the scaffold is still usable in the
-    current session but will not survive worktree removal.
+    Returns True when the scaffold commit succeeds. Emits a warning and returns
+    False when the scaffold is left pending or the commit fails.
     """
     import subprocess as _sp
     add = _sp.run(["git", "add", ".agentic/"], cwd=coordination_root, check=False, capture_output=True)
@@ -358,7 +396,7 @@ def _commit_coordination_scaffold(coordination_root: Path) -> None:
         emit("WARN: could not stage coordination scaffold for commit: {0}".format(
             add.stderr.decode(errors="replace").strip() or add.stdout.decode(errors="replace").strip()
         ))
-        return
+        return False
     commit = _sp.run(
         ["git", "commit", "-m", "Initialize .agentic/ coordination scaffold"],
         cwd=coordination_root,
@@ -366,9 +404,42 @@ def _commit_coordination_scaffold(coordination_root: Path) -> None:
         capture_output=True,
     )
     if commit.returncode != 0:
-        emit("WARN: could not commit coordination scaffold: {0}".format(
-            commit.stderr.decode(errors="replace").strip() or commit.stdout.decode(errors="replace").strip()
-        ))
+        detail = commit.stderr.decode(errors="replace").strip() or commit.stdout.decode(errors="replace").strip()
+        if "Author identity unknown" in detail:
+            emit(
+                "WARN: git identity is not configured, so the coordination scaffold is pending in {0}. "
+                "Set `git config user.name` and `git config user.email`, then run `mesh sync` to finalize it.".format(
+                    coordination_root
+                )
+            )
+        else:
+            emit("WARN: could not commit coordination scaffold: {0}".format(detail))
+        return False
+    return True
+
+
+def _coordination_head_exists(coordination_root: Path) -> bool:
+    result = subprocess.run(
+        ["git", "rev-parse", "--verify", "HEAD"],
+        cwd=coordination_root,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    return result.returncode == 0
+
+
+def _finalize_pending_coordination_scaffold(coordination_root: Path) -> bool:
+    if not coordination_root.exists():
+        return False
+    if _coordination_head_exists(coordination_root):
+        return False
+    if not (coordination_root / ".agentic").exists():
+        return False
+    if _commit_coordination_scaffold(coordination_root):
+        emit("Committed pending coordination scaffold in {0}".format(coordination_root))
+        return True
+    return False
 
 
 def handle_doctor(_: argparse.Namespace) -> int:
@@ -393,6 +464,8 @@ def handle_doctor(_: argparse.Namespace) -> int:
     if errors:
         for error in errors:
             emit("ERROR: {0}".format(error))
+        for hint in adapter_install_hints_from_errors(errors):
+            emit("TIP: {0}".format(hint))
         return 1
     emit("OK: Agent Mesh state is valid.")
     return 0
@@ -411,7 +484,7 @@ def handle_lane_list(_: argparse.Namespace) -> int:
         return 0
     emit("workspace_id\tstatus\tbranch\tworktree_path")
     for lane in lanes:
-        status = inspect_lane_status(lane)
+        status = inspect_lane_status(repo_root, lane, config.coordination.worktree_root)
         emit("{0}\t{1}\t{2}\t{3}".format(
             status.workspace_id,
             status.status,
@@ -452,7 +525,7 @@ def handle_lane_add(args: argparse.Namespace) -> int:
     else:
         path = resolve_lane_worktree_path(repo_root, name, config.coordination.worktree_root)
 
-    config.coordination.lanes.append(LaneEntry(name=name, workspace_id=name, worktree_path=str(path)))
+    config.coordination.lanes.append(LaneEntry(name=name, workspace_id=name))
     save_project_config(repo_root, config)
     emit("Lane: {0} @ {1}".format(name, path))
     return 0
@@ -552,14 +625,104 @@ def handle_adapter_list(_: argparse.Namespace) -> int:
 
 
 def handle_adapter_install(args: argparse.Namespace) -> int:
+    from agent_mesh.config import load_project_config, save_project_config
     from agent_mesh.scaffold import install_adapters
     from agent_mesh.state.storage import resolve_repo_root
 
     repo_root = resolve_repo_root(Path.cwd())
-    result = install_adapters(repo_root, parse_csv(args.adapters), force=args.force)
+    adapters = parse_csv(args.adapters)
+    result = install_adapters(repo_root, adapters, force=args.force)
+    config = load_project_config(repo_root)
+    for adapter in adapters:
+        if adapter not in config.adapters:
+            config.adapters.append(adapter)
+    save_project_config(repo_root, config)
     emit("Installed adapter artifacts: {0}".format(len(result.created)))
     emit("Skipped adapter artifacts: {0}".format(len(result.skipped)))
     return 0
+
+
+def maybe_emit_runtime_adapter_tip(args: argparse.Namespace) -> None:
+    if getattr(args, "command", None) in {None, "version", "init"}:
+        return
+    if getattr(args, "command", None) == "adapter" and getattr(args, "adapter_command", None) == "install":
+        return
+
+    try:
+        from agent_mesh.config import load_project_config
+        from agent_mesh.state.storage import resolve_repo_root
+
+        repo_root = resolve_repo_root(Path.cwd())
+        if not (repo_root / PROJECT_FILE).exists():
+            return
+        config = load_project_config(repo_root)
+    except Exception:
+        return
+
+    adapter = detect_runtime_adapter(args)
+    if not adapter or adapter == "generic":
+        return
+    if adapter_artifacts_installed(repo_root, adapter):
+        return
+
+    if adapter in config.adapters:
+        emit(
+            "TIP: configured {0} adapter files are missing locally. Run: mesh adapter install {0}".format(adapter)
+        )
+        return
+    emit(
+        "TIP: detected {0} runtime. To enable Mesh wrappers for this repo, run: mesh adapter install {0}".format(
+            adapter
+        )
+    )
+
+
+def detect_runtime_adapter(args: argparse.Namespace) -> Optional[str]:
+    for value in [
+        getattr(args, "agent", None),
+        os.environ.get("MESH_AGENT_RUNTIME"),
+        os.environ.get("AGENT_MESH_RUNTIME"),
+    ]:
+        adapter = normalize_runtime_adapter(value)
+        if adapter:
+            return adapter
+    return None
+
+
+def normalize_runtime_adapter(value: Optional[str]) -> Optional[str]:
+    if not value:
+        return None
+    return RUNTIME_ADAPTER_ALIASES.get(str(value).strip().lower())
+
+
+def adapter_artifacts_installed(repo_root: Path, adapter: str) -> bool:
+    if adapter == "claude":
+        return (repo_root / ".claude/skills/claim/SKILL.md").exists() and (repo_root / "CLAUDE.md").exists()
+    if adapter == "codex":
+        return (repo_root / ".agents/skills/claim/SKILL.md").exists()
+    if adapter == "pi":
+        return (repo_root / ".agents/skills/claim/SKILL.md").exists() and (repo_root / ".pi/prompts/claim.md").exists()
+    if adapter == "cursor":
+        return (repo_root / ".cursor/rules/agent-mesh.mdc").exists()
+    if adapter == "opencode":
+        return (repo_root / "OPENCODE.md").exists() and skill_install_status(repo_root, "opencode", "claim") == "installed"
+    if adapter == "windsurf":
+        return (repo_root / ".windsurfrules").exists()
+    return True
+
+
+def adapter_install_hints_from_errors(errors: Iterable[str]) -> List[str]:
+    hints: List[str] = []
+    seen: set[str] = set()
+    for error in errors:
+        for adapter in SUPPORTED_ADAPTERS:
+            if adapter == "generic":
+                continue
+            marker = "for {0}:".format(adapter)
+            if marker in error and adapter not in seen:
+                hints.append("Run: mesh adapter install {0}".format(adapter))
+                seen.add(adapter)
+    return hints
 
 
 def handle_task_add(args: argparse.Namespace) -> int:
@@ -825,27 +988,47 @@ def handle_review(args: argparse.Namespace) -> int:
     return 0
 
 
-def build_dashboard(repo_root: Path, coordination_root: Optional[Path] = None) -> None:
+def build_dashboard(
+    repo_root: Path,
+    coordination_root: Optional[Path] = None,
+    *,
+    public: bool = False,
+    output_dir: Optional[str] = None,
+) -> None:
     from agent_mesh.config import load_project_config
+    from agent_mesh.dashboard import build_dashboard_payload, render_dashboard_html
     from agent_mesh.state.storage import list_claims, list_reviews, list_work_items, resolve_coordination_root
 
     if coordination_root is None:
         coordination_root = resolve_coordination_root(repo_root)
     config = load_project_config(repo_root)
-    output_path = repo_root / config.dashboard.output_dir / "index.html"
+    target_dir = output_dir or ("dist/public-dashboard" if public else config.dashboard.output_dir)
+    output_path = repo_root / target_dir / "index.html"
     output_path.parent.mkdir(parents=True, exist_ok=True)
     work_items = list_work_items(coordination_root)
     claims = list_claims(coordination_root)
     reviews = list_reviews(coordination_root)
-    output_path.write_text(render_dashboard_html(config, work_items, claims, reviews), encoding="utf-8")
+    payload = build_dashboard_payload(config, work_items, claims, reviews, public=public)
+    output_path.write_text(render_dashboard_html(payload), encoding="utf-8")
+    if public:
+        data_path = output_path.parent / "dashboard-data.json"
+        data_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+        emit("Built public dashboard at {0}".format(output_path))
+        emit("Wrote public data snapshot at {0}".format(data_path))
+        return
     emit("Built dashboard at {0}".format(output_path))
 
 
-def handle_dashboard_build(_: argparse.Namespace) -> int:
+def handle_dashboard_build(args: argparse.Namespace) -> int:
     from agent_mesh.state.storage import resolve_coordination_root, resolve_repo_root
 
     repo_root = resolve_repo_root(Path.cwd())
-    build_dashboard(repo_root, resolve_coordination_root(repo_root))
+    build_dashboard(
+        repo_root,
+        resolve_coordination_root(repo_root),
+        public=bool(args.public),
+        output_dir=args.output_dir,
+    )
     return 0
 
 
@@ -1071,12 +1254,15 @@ def handle_merge(args: argparse.Namespace) -> int:
 def handle_sync(_: argparse.Namespace) -> int:
     from agent_mesh.config import load_project_config
     from agent_mesh.state.storage import resolve_coordination_root, resolve_repo_root
-    from agent_mesh.topology import ensure_coordination_worktree
+    from agent_mesh.topology import ensure_coordination_worktree, resolve_coordination_worktree_path
 
     repo_root = resolve_repo_root(Path.cwd())
     coordination_root = resolve_coordination_root(repo_root)
     config = load_project_config(repo_root)
     if config.coordination.worktree_policy != "off" and git_head_available(repo_root):
+        expected_coordination_root = resolve_coordination_worktree_path(repo_root, config)
+        if _finalize_pending_coordination_scaffold(expected_coordination_root):
+            coordination_root = expected_coordination_root
         try:
             coordination = ensure_coordination_worktree(repo_root, config)
             emit(
@@ -1102,6 +1288,24 @@ def handle_sync(_: argparse.Namespace) -> int:
 
 
 def derive_project_key(project_name: str) -> str:
+    tokens = [token for token in re.split(r"[^A-Za-z0-9]+", project_name) if token]
+    weak_tokens = {"agent", "app", "service", "tool", "repo", "project"}
+
+    preferred_tokens = [
+        token for token in tokens
+        if "".join(char for char in token if char.isalnum()) and token.lower() not in weak_tokens
+    ]
+    candidates = preferred_tokens or tokens
+    candidates = sorted(
+        candidates,
+        key=lambda token: (-len("".join(char for char in token if char.isalnum())), tokens.index(token)),
+    )
+
+    for token in candidates:
+        letters = [char for char in token.upper() if char.isalnum()]
+        if letters:
+            return "".join(letters[:4])
+
     letters = [char for char in project_name.upper() if char.isalnum()]
     return "".join(letters[:4]) or "APP"
 
@@ -1332,10 +1536,10 @@ def default_worktree_path(repo_root: Path, workspace_id: str, configured_root: O
     return repo_root.parent / "{0}-{1}".format(repo_root.name, workspace_id)
 
 
-def _assert_lane_available(repo_root: Path, lane) -> None:
+def _assert_lane_available(repo_root: Path, config, lane) -> None:
     from agent_mesh.topology import inspect_lane_status
 
-    status = inspect_lane_status(lane)
+    status = inspect_lane_status(repo_root, lane, config.coordination.worktree_root)
     if status.status == "active":
         raise RuntimeError(
             "lane '{0}' is active on branch {1}; choose an idle lane or omit --lane".format(
@@ -1360,21 +1564,21 @@ def select_claim_lane(repo_root: Path, config, requested_lane: Optional[str], re
         lane = lane_map.get(requested_lane)
         if lane is None:
             raise RuntimeError("lane '{0}' is not registered".format(requested_lane))
-        _assert_lane_available(repo_root, lane)
+        _assert_lane_available(repo_root, config, lane)
         return lane
 
     if requested_workspace_id:
         lane = lane_map.get(requested_workspace_id)
         if lane is not None:
-            _assert_lane_available(repo_root, lane)
+            _assert_lane_available(repo_root, config, lane)
         return lane
 
     for lane in lanes:
-        status = inspect_lane_status(lane)
+        status = inspect_lane_status(repo_root, lane, config.coordination.worktree_root)
         if status.status == "idle":
             return lane
     for lane in lanes:
-        status = inspect_lane_status(lane)
+        status = inspect_lane_status(repo_root, lane, config.coordination.worktree_root)
         if status.status == "missing":
             return lane
     raise RuntimeError("no idle lanes available; run mesh lane list or specify --lane")
@@ -1387,9 +1591,9 @@ def prepare_lane_claim_workspace(
     lane,
     requested_worktree: Optional[str],
 ) -> str:
-    from agent_mesh.topology import provision_lane
+    from agent_mesh.topology import provision_lane, resolve_lane_entry_path
 
-    lane_path = Path(lane.worktree_path).expanduser().resolve()
+    lane_path = resolve_lane_entry_path(repo_root, lane, config.coordination.worktree_root).expanduser().resolve()
     if requested_worktree:
         requested_path = Path(requested_worktree).expanduser()
         requested_path = (repo_root / requested_path).resolve() if not requested_path.is_absolute() else requested_path.resolve()
@@ -1808,226 +2012,9 @@ def create_review_packet(config, work_item, claim):
 
 
 def render_dashboard_html(config, work_items: Iterable[object], claims: Iterable[object], reviews: Iterable[object]) -> str:
-    import html as _html
-    e = _html.escape
+    from agent_mesh.dashboard import build_dashboard_payload, render_dashboard_html as _render_dashboard_html
 
-    work_items = list(work_items)
-    claims = list(claims)
-    reviews = list(reviews)
-
-    counts = count_by_status(work_items)
-    total = sum(counts.values())
-    done = counts.get("done", 0)
-    progress_pct = int(done / total * 100) if total else 0
-
-    status_colors = {
-        "done": ("#16a34a", "#dcfce7"),
-        "ready": ("#2563eb", "#dbeafe"),
-        "in_progress": ("#d97706", "#fef3c7"),
-        "blocked": ("#dc2626", "#fee2e2"),
-        "review": ("#7c3aed", "#ede9fe"),
-    }
-    kind_colors = {
-        "bug": ("#dc2626", "#fee2e2"),
-        "feature": ("#0891b2", "#cffafe"),
-        "security": ("#7c3aed", "#ede9fe"),
-        "refactor": ("#4b5563", "#f3f4f6"),
-    }
-    risk_colors = {"high": "#dc2626", "medium": "#d97706", "low": "#16a34a"}
-
-    def badge(text, fg, bg):
-        return '<span style="display:inline-block;padding:1px 8px;border-radius:12px;font-size:0.75rem;font-weight:600;color:{0};background:{1}">{2}</span>'.format(fg, bg, e(text))
-
-    def status_badge(s):
-        fg, bg = status_colors.get(s, ("#374151", "#f3f4f6"))
-        return badge(s, fg, bg)
-
-    def kind_badge(k):
-        fg, bg = kind_colors.get(k, ("#374151", "#f3f4f6"))
-        return badge(k, fg, bg)
-
-    def risk_dot(r):
-        color = risk_colors.get(r, "#9ca3af")
-        return '<span title="risk: {0}" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:{1};margin-right:4px"></span>'.format(e(r), color)
-
-    summary_chips = "".join(
-        '<span style="display:inline-flex;align-items:center;gap:6px;padding:4px 14px;border-radius:20px;background:{1};color:{0};font-weight:600;font-size:0.85rem">'
-        '<span style="font-size:1.1rem">{3}</span>{2}: {4}</span>'.format(
-            fg, bg,
-            e(status),
-            {"done": "✓", "ready": "○", "in_progress": "◉", "blocked": "✗", "review": "⟳"}.get(status, "·"),
-            count,
-            *((fg, bg) for fg, bg in [status_colors.get(status, ("#374151", "#f3f4f6"))]),
-        )
-        for status, count in sorted(counts.items())
-        for fg, bg in [status_colors.get(status, ("#374151", "#f3f4f6"))]
-    )
-
-    task_rows = "".join(
-        '<tr class="task-row" data-status="{status}" data-kind="{kind}">'
-        '<td style="padding:10px 12px;font-family:monospace;font-size:0.85rem;white-space:nowrap">{id}</td>'
-        '<td style="padding:10px 12px">{status_b}</td>'
-        '<td style="padding:10px 12px">{kind_b}</td>'
-        '<td style="padding:10px 6px">{risk_d}</td>'
-        '<td style="padding:10px 12px;max-width:420px">'
-        '<span style="font-weight:500">{title}</span>'
-        '<div class="task-detail" style="display:none;margin-top:6px;font-size:0.82rem;color:#4b5563;line-height:1.6">'
-        '<strong>Module:</strong> {module}&nbsp;&nbsp;<strong>Risk:</strong> {risk}'
-        '</div>'
-        '</td>'
-        '</tr>'.format(
-            id=e(item.id),
-            status=e(item.status),
-            kind=e(getattr(item, "kind", "")),
-            status_b=status_badge(item.status),
-            kind_b=kind_badge(getattr(item, "kind", "")),
-            risk_d=risk_dot(getattr(item, "risk", "")),
-            risk=e(getattr(item, "risk", "—")),
-            title=e(item.title),
-            module=e(getattr(item, "module", "—")),
-        )
-        for item in sorted(work_items, key=lambda x: (x.status != "in_progress", x.status != "review", x.status != "ready", x.id))
-    )
-
-    claim_cards = "".join(
-        '<div style="border:1px solid #e5e7eb;border-radius:8px;padding:12px 14px;margin-bottom:10px">'
-        '<div style="display:flex;justify-content:space-between;align-items:center">'
-        '<span style="font-family:monospace;font-weight:700;color:#1d4ed8">{work_id}</span>'
-        '{status_b}'
-        '</div>'
-        '<div style="font-size:0.82rem;color:#374151;margin-top:6px">'
-        '<span style="margin-right:12px">🤖 {agent}</span>'
-        '<span style="color:#6b7280;font-family:monospace;font-size:0.78rem">{branch}</span>'
-        '</div>'
-        '</div>'.format(
-            work_id=e(c.work_id),
-            status_b=status_badge("in_progress"),
-            agent=e(getattr(c, "agent_runtime", "agent")),
-            branch=e(getattr(c, "branch", "")),
-        )
-        for c in claims
-    ) or '<p style="color:#9ca3af;font-size:0.9rem">No active claims</p>'
-
-    review_cards = "".join(
-        '<div style="display:flex;justify-content:space-between;align-items:center;'
-        'border:1px solid #e5e7eb;border-radius:8px;padding:10px 14px;margin-bottom:8px">'
-        '<span style="font-family:monospace;font-weight:600">{id}</span>'
-        '{status_b}'
-        '</div>'.format(
-            id=e(r.id),
-            status_b=status_badge(r.status),
-        )
-        for r in reviews
-    ) or '<p style="color:#9ca3af;font-size:0.9rem">No reviews</p>'
-
-    return """<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>{project_name} · Agent Mesh</title>
-  <style>
-    *, *::before, *::after {{ box-sizing: border-box; margin: 0; padding: 0; }}
-    body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f8fafc; color: #1e293b; line-height: 1.5; }}
-    header {{ background: linear-gradient(135deg, #0f172a 0%, #1e3a5f 100%); color: white; padding: 28px 32px; }}
-    header h1 {{ font-size: 1.6rem; font-weight: 700; letter-spacing: -0.02em; }}
-    header .sub {{ opacity: 0.65; font-size: 0.85rem; margin-top: 4px; font-family: monospace; }}
-    .main {{ max-width: 1100px; margin: 0 auto; padding: 28px 24px; }}
-    .progress-wrap {{ background: white; border-radius: 12px; padding: 20px 24px; margin-bottom: 24px; box-shadow: 0 1px 3px rgba(0,0,0,.06); }}
-    .progress-label {{ display: flex; justify-content: space-between; font-size: 0.85rem; color: #475569; margin-bottom: 8px; }}
-    .progress-bar {{ height: 10px; background: #e2e8f0; border-radius: 5px; overflow: hidden; }}
-    .progress-fill {{ height: 100%; border-radius: 5px; background: linear-gradient(90deg, #16a34a, #4ade80); transition: width .4s ease; }}
-    .chips {{ display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }}
-    .grid-2 {{ display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 24px; }}
-    @media(max-width:680px) {{ .grid-2 {{ grid-template-columns: 1fr; }} }}
-    .card {{ background: white; border-radius: 12px; padding: 20px 22px; box-shadow: 0 1px 3px rgba(0,0,0,.06); }}
-    .card h2 {{ font-size: 0.95rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: #64748b; margin-bottom: 14px; }}
-    .task-card {{ background: white; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,.06); overflow: hidden; }}
-    .task-card-header {{ padding: 16px 22px; border-bottom: 1px solid #f1f5f9; display: flex; align-items: center; gap: 12px; }}
-    .task-card-header h2 {{ font-size: 0.95rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: #64748b; flex: 1; }}
-    .filters {{ display: flex; gap: 8px; flex-wrap: wrap; }}
-    .filter-btn {{ border: 1px solid #e2e8f0; background: white; border-radius: 6px; padding: 3px 10px; font-size: 0.78rem; cursor: pointer; color: #475569; transition: all .15s; }}
-    .filter-btn:hover, .filter-btn.active {{ background: #1e3a5f; color: white; border-color: #1e3a5f; }}
-    table {{ width: 100%; border-collapse: collapse; }}
-    thead th {{ padding: 10px 12px; text-align: left; font-size: 0.78rem; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: #94a3b8; border-bottom: 1px solid #f1f5f9; }}
-    .task-row {{ border-bottom: 1px solid #f8fafc; cursor: pointer; transition: background .1s; }}
-    .task-row:hover {{ background: #f8fafc; }}
-    .task-row:last-child {{ border-bottom: none; }}
-    .task-detail {{ border-top: 1px solid #f1f5f9; padding: 8px 12px 4px; background: #fafafa; }}
-  </style>
-</head>
-<body>
-  <header>
-    <h1>⬡ {project_name}</h1>
-    <div class="sub">Agent Mesh · <code>{project_key}</code></div>
-  </header>
-  <div class="main">
-    <div class="progress-wrap">
-      <div class="progress-label">
-        <span>Overall progress</span>
-        <span><strong>{done}</strong> / {total} tasks done ({pct}%)</span>
-      </div>
-      <div class="progress-bar"><div class="progress-fill" style="width:{pct}%"></div></div>
-      <div class="chips">{summary_chips}</div>
-    </div>
-    <div class="grid-2">
-      <div class="card">
-        <h2>Active Claims</h2>
-        {claim_cards}
-      </div>
-      <div class="card">
-        <h2>Reviews</h2>
-        {review_cards}
-      </div>
-    </div>
-    <div class="task-card">
-      <div class="task-card-header">
-        <h2>Tasks</h2>
-        <div class="filters">
-          <button class="filter-btn active" onclick="filter(this,'all')">All</button>
-          <button class="filter-btn" onclick="filter(this,'ready')">Ready</button>
-          <button class="filter-btn" onclick="filter(this,'in_progress')">In Progress</button>
-          <button class="filter-btn" onclick="filter(this,'done')">Done</button>
-          <button class="filter-btn" onclick="filter(this,'bug')">Bugs</button>
-          <button class="filter-btn" onclick="filter(this,'feature')">Features</button>
-        </div>
-      </div>
-      <table>
-        <thead><tr>
-          <th>ID</th><th>Status</th><th>Kind</th><th>Risk</th><th>Title</th>
-        </tr></thead>
-        <tbody id="task-tbody">{task_rows}</tbody>
-      </table>
-    </div>
-  </div>
-  <script>
-    document.querySelectorAll('.task-row').forEach(function(row) {{
-      row.addEventListener('click', function() {{
-        var detail = row.querySelector('.task-detail');
-        detail.style.display = detail.style.display === 'none' ? 'block' : 'none';
-      }});
-    }});
-    function filter(btn, val) {{
-      document.querySelectorAll('.filter-btn').forEach(function(b) {{ b.classList.remove('active'); }});
-      btn.classList.add('active');
-      document.querySelectorAll('.task-row').forEach(function(row) {{
-        var show = val === 'all' || row.dataset.status === val || row.dataset.kind === val;
-        row.style.display = show ? '' : 'none';
-      }});
-    }}
-  </script>
-</body>
-</html>""".format(
-        project_name=e(config.project_name),
-        project_key=e(config.project_key),
-        done=done,
-        total=total,
-        pct=progress_pct,
-        summary_chips=summary_chips,
-        claim_cards=claim_cards,
-        review_cards=review_cards,
-        task_rows=task_rows,
-    )
+    return _render_dashboard_html(build_dashboard_payload(config, work_items, claims, reviews))
 
 
 def count_by_status(items: Iterable[object]) -> dict[str, int]:

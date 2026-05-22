@@ -32,4 +32,4 @@ def test_project_config_serializes_to_json() -> None:
     payload = json.loads(config.to_json())
 
     assert payload["project_name"] == "demo"
-    assert payload["dashboard"]["output_dir"] == ".agentic/dashboard"
+    assert payload["dashboard"]["output_dir"] == "dist/mesh-dashboard"

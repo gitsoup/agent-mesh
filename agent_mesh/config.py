@@ -19,7 +19,7 @@ class PlanningConfig(BaseModel):
 class LaneEntry(BaseModel):
     name: str
     workspace_id: str
-    worktree_path: str
+    worktree_path: Optional[str] = None
 
 
 class CoordinationConfig(BaseModel):
@@ -42,7 +42,7 @@ class RunnerConfig(BaseModel):
 
 class DashboardConfig(BaseModel):
     enabled: bool = True
-    output_dir: str = ".agentic/dashboard"
+    output_dir: str = "dist/mesh-dashboard"
 
 
 class ProjectConfig(BaseModel):

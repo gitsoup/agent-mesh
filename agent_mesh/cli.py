@@ -861,6 +861,7 @@ def handle_merge(args: argparse.Namespace) -> int:
     coordination_root = resolve_coordination_root(repo_root)
     config = load_project_config(repo_root)
     warnings_fired = False
+    lane = None
 
     work_path = coordination_root / ".agentic/work" / "{0}.json".format(args.work_id)
     if not work_path.exists():
@@ -873,6 +874,11 @@ def handle_merge(args: argparse.Namespace) -> int:
         emit("ERROR: no active claim for {0}".format(args.work_id))
         return 1
     claim = load_model(claim_path, Claim)
+    if claim.workspace_id:
+        for configured_lane in config.coordination.lanes:
+            if configured_lane.workspace_id == claim.workspace_id:
+                lane = configured_lane
+                break
 
     # Guard: verify branch is merged into default branch before destroying anything
     if claim.branch and not getattr(args, "skip_merge_check", False):
@@ -889,11 +895,11 @@ def handle_merge(args: argparse.Namespace) -> int:
 
     coordination_worktree = resolve_coordination_worktree_path(repo_root, config)
 
-    # Remove task worktree if it exists and is not the coordination worktree
+    # Return lane worktrees to idle; remove legacy task worktrees.
     if config.coordination.worktree_policy != "off" and claim.worktree:
         worktree_path = Path(claim.worktree).resolve()
         if worktree_path == coordination_worktree.resolve():
-            emit("ERROR: claim worktree matches the coordination worktree — refusing to remove it")
+            emit("ERROR: claim worktree matches the coordination worktree — refusing to modify it")
             return 1
         if worktree_path.exists() and (worktree_path / ".git").exists():
             dirty = run_git(worktree_path, ["status", "--porcelain"])
@@ -905,16 +911,57 @@ def handle_merge(args: argparse.Namespace) -> int:
                     )
                     return 1
                 emit("Discarding uncommitted changes in worktree {0} (--discard-uncommitted)".format(worktree_path))
-            result = run_git(repo_root, ["worktree", "remove", "--force", str(worktree_path)])
-            if result.returncode == 0:
-                emit("Removed worktree: {0}".format(worktree_path))
+                clean_result = run_git(worktree_path, ["clean", "-fd"])
+                if clean_result.returncode != 0:
+                    emit("WARNING: could not clean untracked files in worktree {0}: {1}".format(
+                        worktree_path,
+                        (clean_result.stderr or clean_result.stdout).strip(),
+                    ))
+                    warnings_fired = True
+            if lane is not None:
+                base_branch = "wt/{0}".format(lane.workspace_id)
+                current_branch = run_git(worktree_path, ["branch", "--show-current"])
+                ensure_git_ok(current_branch, "failed to inspect lane worktree branch during merge")
+                active_branch = current_branch.stdout.strip()
+                if active_branch != base_branch:
+                    switch_result = run_git(worktree_path, ["switch", base_branch])
+                    if switch_result.returncode == 0:
+                        emit("Returned lane to base branch: {0}".format(base_branch))
+                    else:
+                        emit("WARNING: could not switch lane worktree {0} to {1}: {2}".format(
+                            worktree_path,
+                            base_branch,
+                            (switch_result.stderr or switch_result.stdout).strip(),
+                        ))
+                        warnings_fired = True
+                reset_target = "origin/{0}".format(config.default_branch)
+                if not ref_exists(repo_root, "refs/remotes/{0}".format(reset_target)):
+                    reset_target = config.default_branch
+                reset_result = run_git(worktree_path, ["reset", "--hard", reset_target])
+                if reset_result.returncode == 0:
+                    emit("Reset lane worktree to {0}: {1}".format(reset_target, worktree_path))
+                else:
+                    emit("WARNING: could not reset lane worktree {0} to {1}: {2}".format(
+                        worktree_path,
+                        reset_target,
+                        (reset_result.stderr or reset_result.stdout).strip(),
+                    ))
+                    warnings_fired = True
             else:
-                emit("WARNING: could not remove worktree {0}: {1}".format(
-                    worktree_path, (result.stderr or result.stdout).strip()
-                ))
-                warnings_fired = True
+                result = run_git(repo_root, ["worktree", "remove", "--force", str(worktree_path)])
+                if result.returncode == 0:
+                    emit("Removed worktree: {0}".format(worktree_path))
+                else:
+                    emit("WARNING: could not remove worktree {0}: {1}".format(
+                        worktree_path, (result.stderr or result.stdout).strip()
+                    ))
+                    warnings_fired = True
         else:
-            emit("Worktree already absent: {0}".format(claim.worktree))
+            if lane is not None:
+                emit("WARNING: lane worktree missing during merge: {0}".format(claim.worktree))
+                warnings_fired = True
+            else:
+                emit("Worktree already absent: {0}".format(claim.worktree))
 
     # Delete remote branch
     if claim.branch and not args.no_push:
@@ -986,6 +1033,14 @@ def handle_merge(args: argparse.Namespace) -> int:
         if review.status != "merged":
             emit("WARNING: review packet still pending after merge: {0}".format(review.id))
             warnings_fired = True
+
+    if lane is not None and claim.worktree:
+        lane_path = Path(claim.worktree).resolve()
+        if lane_path.exists() and (lane_path / ".git").exists():
+            current_branch = run_git(lane_path, ["branch", "--show-current"])
+            if current_branch.returncode != 0 or current_branch.stdout.strip() != "wt/{0}".format(lane.workspace_id):
+                emit("WARNING: lane {0} did not return to idle base branch".format(lane.workspace_id))
+                warnings_fired = True
 
     if config.dashboard.enabled and not warnings_fired:
         build_dashboard(repo_root, coordination_root)

@@ -94,3 +94,17 @@ mesh adapter install opencode
 When Mesh can infer a likely runtime, commands such as `mesh doctor`,
 `mesh status`, or `mesh claim` will print an install tip if the corresponding
 adapter files are missing.
+
+## Brownfield Adoption
+
+In an existing repo, `mesh init` preserves a user-authored root `AGENTS.md`.
+It does not automatically rewrite that file to insert Mesh startup routing.
+
+Instead, brownfield adoption works in two steps:
+
+- `mesh init` scaffolds Mesh state and writes `.agentic/AGENTS-BOOTSTRAP.md`
+- `mesh doctor` reports adoption as incomplete until the Mesh bootstrap block is
+  merged into the root `AGENTS.md`
+
+This keeps repo-specific instructions intact while making missing Mesh startup
+control explicit and actionable.

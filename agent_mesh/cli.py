@@ -237,7 +237,7 @@ def handle_version(_: argparse.Namespace) -> int:
 
 def handle_init(args: argparse.Namespace) -> int:
     from agent_mesh.config import load_project_config
-    from agent_mesh.scaffold import init_repo
+    from agent_mesh.scaffold import has_mesh_agents_bootstrap, init_repo
     from agent_mesh.state.storage import resolve_repo_root
     from agent_mesh.topology import ensure_coordination_worktree, inspect_coordination_worktree
 
@@ -253,6 +253,7 @@ def handle_init(args: argparse.Namespace) -> int:
     project_key = args.project_key or derive_project_key(project_name)
     adapters = parse_csv(args.adapters)
     existing_project = repo_root / ".agentic/project.json"
+    had_existing_agents = (repo_root / "AGENTS.md").exists()
 
     if args.worktree_policy != "off" and git_head_available(repo_root):
         identity_required = not existing_project.exists()
@@ -315,6 +316,11 @@ def handle_init(args: argparse.Namespace) -> int:
     emit("Created {0} files.".format(len(result.created)))
     emit("Skipped {0} existing files.".format(len(result.skipped)))
     emit("Adapter wrappers can be added later with: mesh adapter install <adapter>")
+    if had_existing_agents and not args.force and not has_mesh_agents_bootstrap(repo_root / "AGENTS.md"):
+        emit("WARNING: brownfield adoption is incomplete: root AGENTS.md does not route agents into Agent Mesh.")
+        emit("WARNING: merge the bootstrap block from .agentic/AGENTS-BOOTSTRAP.md into AGENTS.md.")
+    for hint in repo_runtime_adapter_tips(repo_root, load_project_config(repo_root)):
+        emit("TIP: {0}".format(hint))
     if (
         coordination_root is not None
         and coordination_root != repo_root
@@ -491,7 +497,11 @@ def handle_doctor(_: argparse.Namespace) -> int:
             emit("ERROR: {0}".format(error))
         for hint in adapter_install_hints_from_errors(errors):
             emit("TIP: {0}".format(hint))
+        for hint in repo_runtime_adapter_tips(repo_root, config):
+            emit("TIP: {0}".format(hint))
         return 1
+    for hint in repo_runtime_adapter_tips(repo_root, config):
+        emit("TIP: {0}".format(hint))
     emit("OK: Agent Mesh state is valid.")
     return 0
 
@@ -748,6 +758,20 @@ def adapter_install_hints_from_errors(errors: Iterable[str]) -> List[str]:
                 hints.append("Run: mesh adapter install {0}".format(adapter))
                 seen.add(adapter)
     return hints
+
+
+def repo_runtime_adapter_tips(repo_root: Path, config) -> List[str]:
+    tips: List[str] = []
+    if repo_has_claude_runtime_files(repo_root) and not adapter_artifacts_installed(repo_root, "claude"):
+        if "claude" in config.adapters:
+            tips.append("configured claude adapter files are missing locally. Run: mesh adapter install claude")
+        else:
+            tips.append("detected claude runtime files in this repo. To enable Mesh wrappers for this repo, run: mesh adapter install claude")
+    return tips
+
+
+def repo_has_claude_runtime_files(repo_root: Path) -> bool:
+    return (repo_root / ".claude").exists() or (repo_root / "CLAUDE.md").exists()
 
 
 def handle_task_add(args: argparse.Namespace) -> int:

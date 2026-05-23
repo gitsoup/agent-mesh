@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from agent_mesh.config import ProjectConfig
+from agent_mesh.scaffold import render_agents_md
 from agent_mesh.state.storage import atomic_write_json, load_json, resolve_repo_root
 from agent_mesh.state.validate import validate_state_tree
 from agent_mesh.topology import inspect_coordination_worktree, resolve_coordination_worktree_path
@@ -81,6 +82,7 @@ def test_validate_state_tree_accepts_valid_project_file(tmp_path: Path) -> None:
         repo_root / ".agentic/skills",
     ]:
         required_path.mkdir(parents=True, exist_ok=True)
+    (repo_root / "AGENTS.md").write_text(render_agents_md("demo"), encoding="utf-8")
     (repo_root / ".agentic/context/CONTEXT.md").write_text("# Context\n", encoding="utf-8")
     (repo_root / ".agentic/context/CONTEXT-MAP.md").write_text("# Context Map\n", encoding="utf-8")
     project_file.write_text(
@@ -142,6 +144,7 @@ def test_validate_state_tree_rejects_wrong_branch_coordination_worktree(tmp_path
         repo_root / ".agentic/skills",
     ]:
         required_path.mkdir(parents=True, exist_ok=True)
+    (repo_root / "AGENTS.md").write_text(render_agents_md("demo"), encoding="utf-8")
     (repo_root / ".agentic/context/CONTEXT.md").write_text("# Context\n", encoding="utf-8")
     (repo_root / ".agentic/context/CONTEXT-MAP.md").write_text("# Context Map\n", encoding="utf-8")
     project_file.write_text(

@@ -8,6 +8,7 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from agent_mesh.config import PROJECT_FILE, ProjectConfig
+from agent_mesh.scaffold import has_mesh_agents_bootstrap
 from agent_mesh.skills.catalog import SKILLS
 from agent_mesh.state.models import Claim, ReviewPacket, WorkItem
 from agent_mesh.state.storage import (
@@ -82,6 +83,13 @@ def validate_required_paths(repo_root: Path, coordination_root: Path) -> list[st
         coordination_root / ".agentic/reviews",
     ]
     errors: list[str] = []
+    agents_path = repo_root / "AGENTS.md"
+    if not agents_path.exists():
+        errors.append("Missing required path: AGENTS.md")
+    elif not has_mesh_agents_bootstrap(agents_path):
+        errors.append(
+            "Root AGENTS.md is missing Agent Mesh startup routing; merge .agentic/AGENTS-BOOTSTRAP.md into AGENTS.md"
+        )
     for path in repo_required:
         if not path.exists():
             errors.append(f"Missing required path: {path.relative_to(repo_root)}")

@@ -265,6 +265,67 @@ def init_repo(
         created,
         skipped,
     )
+    if state_root != repo_root:
+        record_result(
+            write_json(state_root / ".agentic/project.json", config.model_dump(), force=True),
+            created,
+            skipped,
+        )
+        record_result(
+            write_text(
+                state_root / ".agentic/config.toml",
+                render_config_toml(config),
+                force=force,
+            ),
+            created,
+            skipped,
+        )
+        record_result(
+            write_text(
+                state_root / ".agentic/AGENTS-BOOTSTRAP.md",
+                render_agents_bootstrap_snippet(project_name),
+                force=force,
+            ),
+            created,
+            skipped,
+        )
+        record_result(
+            write_text(
+                state_root / ".agentic/context/CONTEXT.md",
+                (
+                    "# Context\n\n"
+                    "Document stable domain language, key concepts, and durable decisions here.\n"
+                ),
+                force=force,
+            ),
+            created,
+            skipped,
+        )
+        record_result(
+            write_text(
+                state_root / ".agentic/context/CONTEXT-MAP.md",
+                (
+                    "# Context Map\n\n"
+                    "Map major modules, boundaries, and where durable context lives.\n"
+                ),
+                force=force,
+            ),
+            created,
+            skipped,
+        )
+        record_result(
+            write_text(
+                state_root / ".agentic/context/adr/README.md",
+                (
+                    "# ADRs\n\n"
+                    "Store architecture decision records here when decisions are durable "
+                    "and hard to reverse.\n"
+                ),
+                force=force,
+            ),
+            created,
+            skipped,
+        )
 
     # State README files go to state_root (coordination worktree when set)
     for folder_name in ["work", "claims", "reviews", "handoffs", "adapters"]:
@@ -306,6 +367,23 @@ def init_repo(
             created,
             skipped,
         )
+        if state_root != repo_root:
+            record_result(
+                write_text(
+                    state_root / ".agentic/workflows" / "{0}.md".format(skill.name),
+                    render_workflow(skill),
+                    force=force,
+                ),
+                created,
+                skipped,
+            )
+            state_skill_dir = state_root / ".agentic/skills" / skill.name
+            ensure_directory(state_skill_dir)
+            record_result(
+                write_text(state_skill_dir / "SKILL.md", render_skill(skill), force=force),
+                created,
+                skipped,
+            )
 
     record_result(
         write_text(

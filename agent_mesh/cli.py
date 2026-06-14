@@ -473,6 +473,48 @@ def _finalize_pending_coordination_scaffold(coordination_root: Path) -> bool:
     return False
 
 
+def _bootstrap_project_config(repo_root: Path):
+    from agent_mesh.config import ProjectConfig
+
+    return ProjectConfig(
+        project_name=repo_root.name,
+        project_key=derive_project_key(repo_root.name),
+    )
+
+
+def _load_project_config_or_bootstrap(repo_root: Path):
+    from agent_mesh.config import load_project_config
+
+    try:
+        return load_project_config(repo_root), True
+    except FileNotFoundError:
+        return _bootstrap_project_config(repo_root), False
+
+
+def _missing_coordination_worktree_from_remote(repo_root: Path, config) -> object | None:
+    from agent_mesh.topology import inspect_coordination_worktree, remote_branch_exists
+
+    coordination = inspect_coordination_worktree(repo_root, config)
+    if (
+        config.coordination.worktree_policy != "off"
+        and git_head_available(repo_root)
+        and coordination.state == "missing"
+        and remote_branch_exists(repo_root, "origin", coordination.branch)
+    ):
+        return coordination
+    return None
+
+
+def _emit_missing_coordination_bootstrap(coordination) -> None:
+    emit(
+        "ERROR: coordination worktree is missing for {0} at {1}".format(
+            coordination.branch,
+            coordination.path,
+        )
+    )
+    emit("TIP: Run `mesh sync` to create it from origin/{0}.".format(coordination.branch))
+
+
 def handle_doctor(_: argparse.Namespace) -> int:
     from agent_mesh.config import load_project_config
     from agent_mesh.state.storage import resolve_coordination_root, resolve_repo_root
@@ -480,6 +522,16 @@ def handle_doctor(_: argparse.Namespace) -> int:
     from agent_mesh.topology import lane_base_branch_diverged
 
     repo_root = resolve_repo_root(Path.cwd())
+    config, has_project_config = _load_project_config_or_bootstrap(repo_root)
+    missing_coordination = _missing_coordination_worktree_from_remote(repo_root, config)
+    if missing_coordination is not None:
+        _emit_missing_coordination_bootstrap(missing_coordination)
+        return 1
+    if not has_project_config:
+        emit("ERROR: Missing .agentic/project.json")
+        emit("TIP: If this is a fresh clone of a Mesh repo, run `mesh sync`.")
+        return 1
+
     coordination_root = resolve_coordination_root(repo_root)
     errors = validate_state_tree(repo_root, coordination_root)
 
@@ -572,6 +624,16 @@ def handle_status(args: argparse.Namespace) -> int:
     from agent_mesh.topology import inspect_coordination_worktree
 
     repo_root = resolve_repo_root(Path.cwd())
+    config, has_project_config = _load_project_config_or_bootstrap(repo_root)
+    missing_coordination = _missing_coordination_worktree_from_remote(repo_root, config)
+    if missing_coordination is not None:
+        _emit_missing_coordination_bootstrap(missing_coordination)
+        return 1
+    if not has_project_config:
+        emit("ERROR: Missing .agentic/project.json")
+        emit("TIP: If this is a fresh clone of a Mesh repo, run `mesh sync`.")
+        return 1
+
     coordination_root = resolve_coordination_root(repo_root)
     config = load_project_config(repo_root)
     work_items = list_effective_work_items(repo_root, coordination_root)
@@ -1370,7 +1432,7 @@ def handle_sync(_: argparse.Namespace) -> int:
 
     repo_root = resolve_repo_root(Path.cwd())
     coordination_root = resolve_coordination_root(repo_root)
-    config = load_project_config(repo_root)
+    config, _ = _load_project_config_or_bootstrap(repo_root)
     if config.coordination.worktree_policy != "off" and git_head_available(repo_root):
         expected_coordination_root = resolve_coordination_worktree_path(repo_root, config)
         if _finalize_pending_coordination_scaffold(expected_coordination_root):
@@ -1386,6 +1448,21 @@ def handle_sync(_: argparse.Namespace) -> int:
             )
             # Re-probe after ensure in case the worktree was just created
             coordination_root = resolve_coordination_root(repo_root)
+            try:
+                config = load_project_config(repo_root)
+            except FileNotFoundError:
+                emit(
+                    "ERROR: {0} is missing from the coordination state at {1}".format(
+                        PROJECT_FILE,
+                        coordination_root,
+                    )
+                )
+                emit(
+                    "TIP: Repair origin/{0} so it contains a complete .agentic/ tree.".format(
+                        config.coordination.branch
+                    )
+                )
+                return 1
         except RuntimeError as error:
             emit("ERROR: {0}".format(error))
             return 1

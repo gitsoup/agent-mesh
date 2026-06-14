@@ -38,7 +38,7 @@ def init_repo(tmp_path: Path, monkeypatch, capsys) -> Path:
         ],
         capsys,
     )
-    assert exit_code == 0
+    assert exit_code == 0, output
     assert "Initialized Agent Mesh" in output
     return repo_root
 
@@ -78,7 +78,7 @@ def init_real_repo(tmp_path: Path, monkeypatch, capsys, *, lanes: int = 0) -> Pa
     if lanes:
         cli_args += ["--lanes", str(lanes)]
     exit_code, output = run_cli(cli_args, capsys)
-    assert exit_code == 0
+    assert exit_code == 0, output
     assert "Initialized Agent Mesh" in output
     return repo_root
 
@@ -1011,6 +1011,126 @@ def test_sync_recreates_missing_coordination_worktree(tmp_path: Path, monkeypatc
     assert exit_code == 0
     assert "Coordination worktree created: mesh/state @" in output
     assert coordination_path.exists()
+
+
+def test_fresh_clone_doctor_points_to_sync_before_validating_stale_root_state(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    source = init_real_repo(tmp_path, monkeypatch, capsys)
+    bad_review = source / ".agentic/reviews/PR-OLD.json"
+    bad_review.parent.mkdir(parents=True, exist_ok=True)
+    bad_review.write_text(
+        json.dumps(
+            {
+                "schema_version": "0.1",
+                "id": "PR-OLD",
+                "work_id": "APP-1",
+                "status": "merged",
+                "pr": {"number": 1},
+                "context": {
+                    "work_item": ".agentic/work/APP-1.json",
+                    "claim": ".agentic/claims/APP-1.json",
+                },
+                "created_at": "2026-01-01T00:00:00Z",
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    subprocess.run(
+        ["git", "add", "AGENTS.md", ".agentic"],
+        cwd=source,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "Add legacy root coordination state"],
+        cwd=source,
+        check=True,
+        capture_output=True,
+    )
+
+    remote = tmp_path / "origin.git"
+    subprocess.run(["git", "init", "--bare", str(remote)], check=True, capture_output=True)
+    subprocess.run(
+        ["git", "remote", "add", "origin", str(remote)],
+        cwd=source,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(["git", "push", "origin", "main"], cwd=source, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "push", "origin", "mesh/state"],
+        cwd=source,
+        check=True,
+        capture_output=True,
+    )
+
+    clone = tmp_path / "fresh-clone"
+    subprocess.run(["git", "clone", str(remote), str(clone)], check=True, capture_output=True)
+    monkeypatch.chdir(clone)
+
+    exit_code, output = run_cli(["doctor"], capsys)
+
+    assert exit_code == 1
+    assert "coordination worktree is missing for mesh/state" in output
+    assert "Run `mesh sync`" in output
+    assert "Invalid" not in output
+
+
+def test_sync_bootstraps_coordination_worktree_from_remote_mesh_state(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    source = init_real_repo(tmp_path, monkeypatch, capsys)
+    subprocess.run(["git", "add", "AGENTS.md"], cwd=source, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "Add root bootstrap contract"],
+        cwd=source,
+        check=True,
+        capture_output=True,
+    )
+
+    remote = tmp_path / "origin.git"
+    subprocess.run(["git", "init", "--bare", str(remote)], check=True, capture_output=True)
+    subprocess.run(
+        ["git", "remote", "add", "origin", str(remote)],
+        cwd=source,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(["git", "push", "origin", "main"], cwd=source, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "push", "origin", "mesh/state"],
+        cwd=source,
+        check=True,
+        capture_output=True,
+    )
+
+    clone = tmp_path / "fresh-clone"
+    subprocess.run(["git", "clone", str(remote), str(clone)], check=True, capture_output=True)
+    monkeypatch.chdir(clone)
+
+    exit_code, output = run_cli(["sync"], capsys)
+
+    coordination_path = clone.parent / "fresh-clone-mesh-state"
+    assert exit_code == 0, output
+    assert "Coordination worktree created: mesh/state @" in output
+    assert coordination_path.exists()
+    assert (coordination_path / ".agentic/project.json").exists()
+    branch = subprocess.run(
+        ["git", "branch", "--show-current"],
+        cwd=coordination_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    assert branch == "mesh/state"
+
+    exit_code, output = run_cli(["status", "--skip-dashboard-rebuild"], capsys)
+    assert exit_code == 0
+    assert "Coordination: mesh/state @" in output
+    assert "[ready]" in output
 
 
 def test_coordination_worktree_uses_orphan_branch(tmp_path: Path, monkeypatch, capsys) -> None:

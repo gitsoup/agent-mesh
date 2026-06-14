@@ -26,8 +26,10 @@ def validate_state_tree(repo_root: Path, coordination_root: Path | None = None) 
     if coordination_root is None:
         coordination_root = repo_root
     errors: list[str] = []
-    # project.json is always authoritative in repo_root (never in coordination_root)
-    project_file = repo_root / PROJECT_FILE
+    root_project_file = repo_root / PROJECT_FILE
+    coordination_project_file = coordination_root / PROJECT_FILE
+    project_file = root_project_file if root_project_file.exists() else coordination_project_file
+    contract_root = repo_root if root_project_file.exists() else coordination_root
     if not project_file.exists():
         errors.append(f"Missing {PROJECT_FILE}")
         return errors
@@ -38,12 +40,12 @@ def validate_state_tree(repo_root: Path, coordination_root: Path | None = None) 
     except ValidationError as exc:
         errors.append(f"Invalid .agentic/project.json: {exc}")
 
-    errors.extend(validate_directory(repo_root / ".agentic/work", WorkItem))
-    if coordination_root != repo_root:
+    errors.extend(validate_directory(contract_root / ".agentic/work", WorkItem))
+    if coordination_root != contract_root:
         errors.extend(validate_directory(coordination_root / ".agentic/work", WorkItem))
     errors.extend(validate_directory(coordination_root / ".agentic/claims", Claim))
     errors.extend(validate_directory(coordination_root / ".agentic/reviews", ReviewPacket))
-    errors.extend(validate_required_paths(repo_root, coordination_root))
+    errors.extend(validate_required_paths(repo_root, coordination_root, contract_root))
     if config is not None:
         errors.extend(validate_adapter_artifacts(repo_root, config))
         errors.extend(validate_coordination_topology(repo_root, config))
@@ -69,13 +71,18 @@ def validate_directory(path: Path, model_type: object) -> list[str]:
     return errors
 
 
-def validate_required_paths(repo_root: Path, coordination_root: Path) -> list[str]:
-    # Config/definition paths always live in repo_root
-    repo_required = [
-        repo_root / ".agentic/context/CONTEXT.md",
-        repo_root / ".agentic/context/CONTEXT-MAP.md",
-        repo_root / ".agentic/workflows",
-        repo_root / ".agentic/skills",
+def validate_required_paths(
+    repo_root: Path,
+    coordination_root: Path,
+    contract_root: Path | None = None,
+) -> list[str]:
+    if contract_root is None:
+        contract_root = repo_root
+    contract_required = [
+        contract_root / ".agentic/context/CONTEXT.md",
+        contract_root / ".agentic/context/CONTEXT-MAP.md",
+        contract_root / ".agentic/workflows",
+        contract_root / ".agentic/skills",
     ]
     # Live-state paths live in coordination_root (may equal repo_root when no worktree)
     state_required = [
@@ -88,11 +95,17 @@ def validate_required_paths(repo_root: Path, coordination_root: Path) -> list[st
         errors.append("Missing required path: AGENTS.md")
     elif not has_mesh_agents_bootstrap(agents_path):
         errors.append(
-            "Root AGENTS.md is missing Agent Mesh startup routing; merge .agentic/AGENTS-BOOTSTRAP.md into AGENTS.md"
+            "Root AGENTS.md is missing Agent Mesh startup routing; "
+            "merge .agentic/AGENTS-BOOTSTRAP.md into AGENTS.md"
         )
-    for path in repo_required:
+    for path in contract_required:
         if not path.exists():
-            errors.append(f"Missing required path: {path.relative_to(repo_root)}")
+            base = contract_root if contract_root != repo_root else repo_root
+            try:
+                label = path.relative_to(base)
+            except ValueError:
+                label = path
+            errors.append(f"Missing required path: {label}")
     for path in state_required:
         if not path.exists():
             base = coordination_root if coordination_root != repo_root else repo_root

@@ -10,8 +10,23 @@
   "worktree": "/Users/karthick/code/gitsoup/agent-mesh-codex-kwg7mjw1h9",
   "branch": "feat/MESH-4-design-brownfield-adoption-and-migration-flow",
   "claimed_at": "2026-06-15T18:47:27Z",
-  "last_seen": "2026-06-15T20:02:20Z",
-  "evidence": [],
+  "last_seen": "2026-06-15T20:14:41Z",
+  "evidence": [
+    {
+      "kind": "test",
+      "command": "uv run --extra dev pytest tests/test_workflow.py::test_init_publishes_coordination_branch_by_default_when_origin_exists tests/test_workflow.py::test_init_no_push_warns_that_coordination_is_local_only tests/test_workflow.py::test_init_refuses_when_remote_mesh_state_already_exists",
+      "result": "pass",
+      "summary": "3 passed",
+      "created_at": "2026-06-15T20:16:16Z"
+    },
+    {
+      "kind": "test",
+      "command": "uv run --extra dev pytest",
+      "result": "pass",
+      "summary": "118 passed",
+      "created_at": "2026-06-15T20:16:16Z"
+    }
+  ],
   "events": [
     {
       "action": "claimed",

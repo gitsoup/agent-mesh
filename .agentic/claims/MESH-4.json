@@ -10,7 +10,7 @@
   "worktree": "/Users/karthick/code/gitsoup/agent-mesh-codex-kwg7mjw1h9",
   "branch": "feat/MESH-4-design-brownfield-adoption-and-migration-flow",
   "claimed_at": "2026-06-15T18:47:27Z",
-  "last_seen": "2026-06-15T20:14:41Z",
+  "last_seen": "2026-06-15T22:18:14Z",
   "evidence": [
     {
       "kind": "test",
@@ -25,6 +25,20 @@
       "result": "pass",
       "summary": "118 passed",
       "created_at": "2026-06-15T20:16:16Z"
+    },
+    {
+      "kind": "test",
+      "command": "uv run --extra dev pytest tests/test_workflow.py::test_init_creates_agentic_scaffold tests/test_workflow.py::test_init_creates_coordination_worktree_for_real_git_repo tests/test_workflow.py::test_adoption_report_detects_ongoing_mesh_repo tests/test_workflow.py::test_bootstrap_tasks_creates_normalized_work_items_from_stdin tests/test_workflow.py::test_bootstrap_tasks_updates_existing_work_item_from_input_file",
+      "result": "pass",
+      "summary": "5 passed",
+      "created_at": "2026-06-15T22:18:14Z"
+    },
+    {
+      "kind": "test",
+      "command": "uv run --extra dev pytest",
+      "result": "pass",
+      "summary": "118 passed",
+      "created_at": "2026-06-15T22:18:14Z"
     }
   ],
   "events": [

@@ -4,7 +4,7 @@
   "title": "Detect incomplete brownfield Mesh adoption in root AGENTS.md",
   "description": "Detect incomplete brownfield Mesh adoption in root AGENTS.md",
   "kind": "feature",
-  "status": "pr_open",
+  "status": "done",
   "execution": "afk_safe",
   "module": "adoption",
   "planning": {
@@ -21,5 +21,5 @@
   "dependencies": [],
   "risk": "medium",
   "created_at": "2026-05-22T22:49:07Z",
-  "updated_at": "2026-06-14T23:55:00Z"
+  "updated_at": "2026-06-15T00:01:04Z"
 }

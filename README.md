@@ -70,13 +70,16 @@ its own. Agents should inspect the repo and any available planning sources,
 derive an initial task list, then persist it through Mesh:
 
 ```bash
+cp .agentic/examples/bootstrap-tasks.json bootstrap-tasks.json
+# edit bootstrap-tasks.json for this repo
 mesh bootstrap-tasks < bootstrap-tasks.json
 mesh sync
 ```
 
 `mesh bootstrap-tasks` accepts either a JSON array of task objects or an object
 with a top-level `tasks` array. Missing task IDs are assigned automatically
-using the repo project key.
+using the repo project key. `mesh init` scaffolds a sample task file at
+`.agentic/examples/bootstrap-tasks.json`.
 
 ## Adapter Activation
 
@@ -97,8 +100,18 @@ adapter files are missing.
 
 ## Brownfield Adoption
 
-In an existing repo, `mesh init` preserves a user-authored root `AGENTS.md`.
-It does not automatically rewrite that file to insert Mesh startup routing.
+In an existing repo, start with a read-only adoption report:
+
+```bash
+mesh adoption report
+```
+
+The report classifies the repo as greenfield, brownfield adoption, or ongoing
+coordination; lists existing instruction files, planning/task sources, and
+product/context artifacts; and prints the safest next commands.
+
+`mesh init` preserves a user-authored root `AGENTS.md`. It does not
+automatically rewrite that file to insert Mesh startup routing.
 
 Instead, brownfield adoption works in two steps:
 
@@ -107,4 +120,30 @@ Instead, brownfield adoption works in two steps:
   merged into the root `AGENTS.md`
 
 This keeps repo-specific instructions intact while making missing Mesh startup
-control explicit and actionable.
+control explicit and actionable. Existing Linear/GitHub/TODO work should be
+reviewed and normalized through `mesh bootstrap-tasks`; Mesh does not import
+or claim external tasks automatically during init.
+
+By default, `mesh init` uses required worktree isolation, creates a local
+`mesh/state` coordination branch and sibling coordination worktree, and
+publishes that branch when `origin` exists:
+
+```bash
+mesh init
+```
+
+Use `--no-push` only when you intentionally want local-only coordination. Other
+developers cannot discover shared Mesh state from a fresh clone until
+`mesh/state` is available on the remote. If no `origin` remote is configured,
+`mesh init` leaves the branch local and prints the push command to run after the
+remote is wired. Once `mesh/state` is published, a new developer can clone the
+repo and run:
+
+```bash
+mesh sync
+mesh status
+```
+
+`mesh sync` creates their local sibling coordination worktree from
+`origin/mesh/state`; they should not run `mesh init` again unless repairing an
+incomplete adoption.

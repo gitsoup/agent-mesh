@@ -193,6 +193,7 @@ def init_repo(
         repo_root / ".agentic",
         repo_root / ".agentic/context",
         repo_root / ".agentic/context/adr",
+        repo_root / ".agentic/examples",
         repo_root / ".agentic/workflows",
         repo_root / ".agentic/skills",
         repo_root / ".agentic/adapters",
@@ -201,6 +202,7 @@ def init_repo(
     # Live-state directories go to state_root (= coordination_root when set)
     state_directories = [
         state_root / ".agentic",
+        state_root / ".agentic/examples",
         state_root / ".agentic/work",
         state_root / ".agentic/claims",
         state_root / ".agentic/claims/archive",
@@ -265,6 +267,15 @@ def init_repo(
         created,
         skipped,
     )
+    record_result(
+        write_text(
+            repo_root / ".agentic/examples/bootstrap-tasks.json",
+            render_bootstrap_tasks_example(project_key),
+            force=force,
+        ),
+        created,
+        skipped,
+    )
     if state_root != repo_root:
         record_result(
             write_json(state_root / ".agentic/project.json", config.model_dump(), force=True),
@@ -321,6 +332,15 @@ def init_repo(
                     "Store architecture decision records here when decisions are durable "
                     "and hard to reverse.\n"
                 ),
+                force=force,
+            ),
+            created,
+            skipped,
+        )
+        record_result(
+            write_text(
+                state_root / ".agentic/examples/bootstrap-tasks.json",
+                render_bootstrap_tasks_example(project_key),
                 force=force,
             ),
             created,
@@ -669,6 +689,52 @@ claim_stale_after_minutes = {9}
         config.coordination.worktree_policy,
         config.coordination.claim_stale_after_minutes,
     )
+
+
+def render_bootstrap_tasks_example(project_key: str) -> str:
+    example = {
+        "tasks": [
+            {
+                "title": "Map existing architecture and ownership",
+                "description": (
+                    "Review current docs, code boundaries, and known owner areas before "
+                    "creating implementation work."
+                ),
+                "kind": "research",
+                "module": "adoption",
+                "status": "needs_triage",
+                "execution": "hitl",
+                "risk": "low",
+                "acceptance_criteria": [
+                    "Key modules and ownership boundaries are documented",
+                    "Existing planning sources are listed without importing claims automatically",
+                ],
+            },
+            {
+                "id": "{0}-2".format(project_key),
+                "title": "Create first implementation slice",
+                "description": (
+                    "Convert one reviewed brownfield improvement into a ready Mesh work item."
+                ),
+                "kind": "feature",
+                "module": "example",
+                "status": "ready",
+                "execution": "afk_safe",
+                "risk": "medium",
+                "planning": {
+                    "provider": "local",
+                    "url": None,
+                    "external_id": None,
+                },
+                "acceptance_criteria": [
+                    "Scope is small enough for one claim",
+                    "Expected verification command is clear",
+                ],
+                "dependencies": [],
+            },
+        ]
+    }
+    return json.dumps(example, indent=2) + "\n"
 
 
 def render_workflow(skill: SkillDefinition) -> str:

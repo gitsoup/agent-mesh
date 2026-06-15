@@ -237,7 +237,7 @@ def handle_version(_: argparse.Namespace) -> int:
 
 def handle_init(args: argparse.Namespace) -> int:
     from agent_mesh.config import load_project_config
-    from agent_mesh.scaffold import init_repo
+    from agent_mesh.scaffold import has_mesh_agents_bootstrap, init_repo
     from agent_mesh.state.storage import resolve_repo_root
     from agent_mesh.topology import ensure_coordination_worktree, inspect_coordination_worktree
 
@@ -253,6 +253,7 @@ def handle_init(args: argparse.Namespace) -> int:
     project_key = args.project_key or derive_project_key(project_name)
     adapters = parse_csv(args.adapters)
     existing_project = repo_root / ".agentic/project.json"
+    had_existing_agents = (repo_root / "AGENTS.md").exists()
 
     if args.worktree_policy != "off" and git_head_available(repo_root):
         identity_required = not existing_project.exists()
@@ -315,6 +316,11 @@ def handle_init(args: argparse.Namespace) -> int:
     emit("Created {0} files.".format(len(result.created)))
     emit("Skipped {0} existing files.".format(len(result.skipped)))
     emit("Adapter wrappers can be added later with: mesh adapter install <adapter>")
+    if had_existing_agents and not args.force and not has_mesh_agents_bootstrap(repo_root / "AGENTS.md"):
+        emit("WARNING: brownfield adoption is incomplete: root AGENTS.md does not route agents into Agent Mesh.")
+        emit("WARNING: merge the bootstrap block from .agentic/AGENTS-BOOTSTRAP.md into AGENTS.md.")
+    for hint in repo_runtime_adapter_tips(repo_root, load_project_config(repo_root)):
+        emit("TIP: {0}".format(hint))
     if (
         coordination_root is not None
         and coordination_root != repo_root
@@ -467,6 +473,48 @@ def _finalize_pending_coordination_scaffold(coordination_root: Path) -> bool:
     return False
 
 
+def _bootstrap_project_config(repo_root: Path):
+    from agent_mesh.config import ProjectConfig
+
+    return ProjectConfig(
+        project_name=repo_root.name,
+        project_key=derive_project_key(repo_root.name),
+    )
+
+
+def _load_project_config_or_bootstrap(repo_root: Path):
+    from agent_mesh.config import load_project_config
+
+    try:
+        return load_project_config(repo_root), True
+    except FileNotFoundError:
+        return _bootstrap_project_config(repo_root), False
+
+
+def _missing_coordination_worktree_from_remote(repo_root: Path, config) -> object | None:
+    from agent_mesh.topology import inspect_coordination_worktree, remote_branch_exists
+
+    coordination = inspect_coordination_worktree(repo_root, config)
+    if (
+        config.coordination.worktree_policy != "off"
+        and git_head_available(repo_root)
+        and coordination.state == "missing"
+        and remote_branch_exists(repo_root, "origin", coordination.branch)
+    ):
+        return coordination
+    return None
+
+
+def _emit_missing_coordination_bootstrap(coordination) -> None:
+    emit(
+        "ERROR: coordination worktree is missing for {0} at {1}".format(
+            coordination.branch,
+            coordination.path,
+        )
+    )
+    emit("TIP: Run `mesh sync` to create it from origin/{0}.".format(coordination.branch))
+
+
 def handle_doctor(_: argparse.Namespace) -> int:
     from agent_mesh.config import load_project_config
     from agent_mesh.state.storage import resolve_coordination_root, resolve_repo_root
@@ -474,6 +522,16 @@ def handle_doctor(_: argparse.Namespace) -> int:
     from agent_mesh.topology import lane_base_branch_diverged
 
     repo_root = resolve_repo_root(Path.cwd())
+    config, has_project_config = _load_project_config_or_bootstrap(repo_root)
+    missing_coordination = _missing_coordination_worktree_from_remote(repo_root, config)
+    if missing_coordination is not None:
+        _emit_missing_coordination_bootstrap(missing_coordination)
+        return 1
+    if not has_project_config:
+        emit("ERROR: Missing .agentic/project.json")
+        emit("TIP: If this is a fresh clone of a Mesh repo, run `mesh sync`.")
+        return 1
+
     coordination_root = resolve_coordination_root(repo_root)
     errors = validate_state_tree(repo_root, coordination_root)
 
@@ -491,7 +549,11 @@ def handle_doctor(_: argparse.Namespace) -> int:
             emit("ERROR: {0}".format(error))
         for hint in adapter_install_hints_from_errors(errors):
             emit("TIP: {0}".format(hint))
+        for hint in repo_runtime_adapter_tips(repo_root, config):
+            emit("TIP: {0}".format(hint))
         return 1
+    for hint in repo_runtime_adapter_tips(repo_root, config):
+        emit("TIP: {0}".format(hint))
     emit("OK: Agent Mesh state is valid.")
     return 0
 
@@ -562,6 +624,16 @@ def handle_status(args: argparse.Namespace) -> int:
     from agent_mesh.topology import inspect_coordination_worktree
 
     repo_root = resolve_repo_root(Path.cwd())
+    config, has_project_config = _load_project_config_or_bootstrap(repo_root)
+    missing_coordination = _missing_coordination_worktree_from_remote(repo_root, config)
+    if missing_coordination is not None:
+        _emit_missing_coordination_bootstrap(missing_coordination)
+        return 1
+    if not has_project_config:
+        emit("ERROR: Missing .agentic/project.json")
+        emit("TIP: If this is a fresh clone of a Mesh repo, run `mesh sync`.")
+        return 1
+
     coordination_root = resolve_coordination_root(repo_root)
     config = load_project_config(repo_root)
     work_items = list_effective_work_items(repo_root, coordination_root)
@@ -748,6 +820,20 @@ def adapter_install_hints_from_errors(errors: Iterable[str]) -> List[str]:
                 hints.append("Run: mesh adapter install {0}".format(adapter))
                 seen.add(adapter)
     return hints
+
+
+def repo_runtime_adapter_tips(repo_root: Path, config) -> List[str]:
+    tips: List[str] = []
+    if repo_has_claude_runtime_files(repo_root) and not adapter_artifacts_installed(repo_root, "claude"):
+        if "claude" in config.adapters:
+            tips.append("configured claude adapter files are missing locally. Run: mesh adapter install claude")
+        else:
+            tips.append("detected claude runtime files in this repo. To enable Mesh wrappers for this repo, run: mesh adapter install claude")
+    return tips
+
+
+def repo_has_claude_runtime_files(repo_root: Path) -> bool:
+    return (repo_root / ".claude").exists() or (repo_root / "CLAUDE.md").exists()
 
 
 def handle_task_add(args: argparse.Namespace) -> int:
@@ -1346,7 +1432,7 @@ def handle_sync(_: argparse.Namespace) -> int:
 
     repo_root = resolve_repo_root(Path.cwd())
     coordination_root = resolve_coordination_root(repo_root)
-    config = load_project_config(repo_root)
+    config, _ = _load_project_config_or_bootstrap(repo_root)
     if config.coordination.worktree_policy != "off" and git_head_available(repo_root):
         expected_coordination_root = resolve_coordination_worktree_path(repo_root, config)
         if _finalize_pending_coordination_scaffold(expected_coordination_root):
@@ -1362,6 +1448,21 @@ def handle_sync(_: argparse.Namespace) -> int:
             )
             # Re-probe after ensure in case the worktree was just created
             coordination_root = resolve_coordination_root(repo_root)
+            try:
+                config = load_project_config(repo_root)
+            except FileNotFoundError:
+                emit(
+                    "ERROR: {0} is missing from the coordination state at {1}".format(
+                        PROJECT_FILE,
+                        coordination_root,
+                    )
+                )
+                emit(
+                    "TIP: Repair origin/{0} so it contains a complete .agentic/ tree.".format(
+                        config.coordination.branch
+                    )
+                )
+                return 1
         except RuntimeError as error:
             emit("ERROR: {0}".format(error))
             return 1

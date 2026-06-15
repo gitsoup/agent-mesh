@@ -63,11 +63,23 @@ class ProjectConfig(BaseModel):
 
 
 def load_project_config(repo_root: Path) -> ProjectConfig:
-    path = repo_root / PROJECT_FILE
+    path = resolve_project_config_path(repo_root)
     data = json.loads(path.read_text(encoding="utf-8"))
     return ProjectConfig.model_validate(data)
 
 
+def resolve_project_config_path(repo_root: Path) -> Path:
+    path = repo_root / PROJECT_FILE
+    if path.exists():
+        return path
+
+    coordination_path = repo_root.parent / "{0}-mesh-state".format(repo_root.name) / PROJECT_FILE
+    if coordination_path.exists():
+        return coordination_path
+
+    return path
+
+
 def save_project_config(repo_root: Path, config: ProjectConfig) -> None:
     from agent_mesh.state.storage import atomic_write_json
-    atomic_write_json(repo_root / PROJECT_FILE, config.model_dump())
+    atomic_write_json(resolve_project_config_path(repo_root), config.model_dump())

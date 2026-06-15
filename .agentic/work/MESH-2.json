@@ -16,10 +16,11 @@
   "acceptance_criteria": [
     "Define questions for empty vs existing repos",
     "Specify adapter, provider, and dashboard selection flow",
-    "Define what init should scaffold versus defer to later workflows"
+    "Define what init should scaffold versus defer to later workflows",
+    "For brownfield repos with an existing AGENTS.md, define an explicit user choice about whether Mesh may append the bootstrap control block to that file"
   ],
   "dependencies": [],
   "risk": "medium",
   "created_at": "2026-05-17T12:27:30Z",
-  "updated_at": "2026-05-17T12:27:30Z"
+  "updated_at": "2026-05-23T00:00:00Z"
 }

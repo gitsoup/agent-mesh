@@ -13,6 +13,8 @@ from agent_mesh.state.storage import atomic_write_json
 from agent_mesh.utils.paths import ensure_directory
 
 SUPPORTED_ADAPTERS = ["generic", "claude", "codex", "cursor", "opencode", "pi", "windsurf"]
+AGENTS_BOOTSTRAP_START = "<!-- BEGIN AGENT-MESH BOOTSTRAP -->"
+AGENTS_BOOTSTRAP_END = "<!-- END AGENT-MESH BOOTSTRAP -->"
 
 WORKFLOW_STEPS: Dict[str, List[str]] = {
     "setup": [
@@ -229,6 +231,15 @@ def init_repo(
     )
     record_result(
         write_text(
+            repo_root / ".agentic/AGENTS-BOOTSTRAP.md",
+            render_agents_bootstrap_snippet(project_name),
+            force=force,
+        ),
+        created,
+        skipped,
+    )
+    record_result(
+        write_text(
             repo_root / ".agentic/context/CONTEXT.md",
             "# Context\n\nDocument stable domain language, key concepts, and durable decisions here.\n",
             force=force,
@@ -254,6 +265,67 @@ def init_repo(
         created,
         skipped,
     )
+    if state_root != repo_root:
+        record_result(
+            write_json(state_root / ".agentic/project.json", config.model_dump(), force=True),
+            created,
+            skipped,
+        )
+        record_result(
+            write_text(
+                state_root / ".agentic/config.toml",
+                render_config_toml(config),
+                force=force,
+            ),
+            created,
+            skipped,
+        )
+        record_result(
+            write_text(
+                state_root / ".agentic/AGENTS-BOOTSTRAP.md",
+                render_agents_bootstrap_snippet(project_name),
+                force=force,
+            ),
+            created,
+            skipped,
+        )
+        record_result(
+            write_text(
+                state_root / ".agentic/context/CONTEXT.md",
+                (
+                    "# Context\n\n"
+                    "Document stable domain language, key concepts, and durable decisions here.\n"
+                ),
+                force=force,
+            ),
+            created,
+            skipped,
+        )
+        record_result(
+            write_text(
+                state_root / ".agentic/context/CONTEXT-MAP.md",
+                (
+                    "# Context Map\n\n"
+                    "Map major modules, boundaries, and where durable context lives.\n"
+                ),
+                force=force,
+            ),
+            created,
+            skipped,
+        )
+        record_result(
+            write_text(
+                state_root / ".agentic/context/adr/README.md",
+                (
+                    "# ADRs\n\n"
+                    "Store architecture decision records here when decisions are durable "
+                    "and hard to reverse.\n"
+                ),
+                force=force,
+            ),
+            created,
+            skipped,
+        )
 
     # State README files go to state_root (coordination worktree when set)
     for folder_name in ["work", "claims", "reviews", "handoffs", "adapters"]:
@@ -295,6 +367,23 @@ def init_repo(
             created,
             skipped,
         )
+        if state_root != repo_root:
+            record_result(
+                write_text(
+                    state_root / ".agentic/workflows" / "{0}.md".format(skill.name),
+                    render_workflow(skill),
+                    force=force,
+                ),
+                created,
+                skipped,
+            )
+            state_skill_dir = state_root / ".agentic/skills" / skill.name
+            ensure_directory(state_skill_dir)
+            record_result(
+                write_text(state_skill_dir / "SKILL.md", render_skill(skill), force=force),
+                created,
+                skipped,
+            )
 
     record_result(
         write_text(
@@ -505,6 +594,52 @@ This repository uses Agent Mesh for local-first coordination.
         default_branch="main",
         coordination_branch="mesh/state",
     )
+
+
+def render_agents_bootstrap_snippet(project_name: str) -> str:
+    return """{start}
+## Agent Mesh Bootstrap
+
+This repository uses Agent Mesh for local-first coordination.
+
+Before following the rest of this file:
+
+1. Read `.agentic/project.json`.
+2. Read `.agentic/context/CONTEXT.md` and `.agentic/context/CONTEXT-MAP.md`.
+3. Detect repo mode before choosing a workflow:
+   - `greenfield`: little or no durable product/code context yet → `/setup`, `/align`, `/to-prd`, `/to-tasks`
+   - `brownfield adoption`: meaningful repo context exists, but Mesh state does not → `/setup`
+   - `ongoing coordination`: `.agentic/` already exists with work/claim/review state → `/ongoing`
+4. Inspect `.agentic/project.json` and current coordination state before proposing `/setup` or `/claim`.
+5. If `.agentic/work/` has no meaningful work items yet, inspect the repo and any available planning sources, then persist initial tasks with `mesh bootstrap-tasks`.
+6. Use `.agentic/workflows/*.md` as the canonical workflow definitions.
+7. Apply any repo-specific rules below this bootstrap after the Mesh startup checks above.
+
+Project: `{project_name}`
+Canonical coordination state: `.agentic/`
+{end}
+""".format(
+        project_name=project_name,
+        start=AGENTS_BOOTSTRAP_START,
+        end=AGENTS_BOOTSTRAP_END,
+    )
+
+
+def has_mesh_agents_bootstrap(path: Path) -> bool:
+    if not path.exists():
+        return False
+    text = path.read_text(encoding="utf-8")
+    if AGENTS_BOOTSTRAP_START in text and AGENTS_BOOTSTRAP_END in text:
+        return True
+
+    required_markers = [
+        "Agent Mesh",
+        ".agentic/project.json",
+        ".agentic/context/CONTEXT.md",
+        ".agentic/context/CONTEXT-MAP.md",
+        ".agentic/workflows/",
+    ]
+    return all(marker in text for marker in required_markers)
 
 
 def render_config_toml(config: ProjectConfig) -> str:

@@ -205,6 +205,14 @@ def _attempt_create_coordination_worktree(
             capture_output=True,
             text=True,
         )
+    if remote_branch_exists(repo_root, "origin", branch):
+        return subprocess.run(
+            ["git", "worktree", "add", "-b", branch, str(path), "origin/{0}".format(branch)],
+            cwd=repo_root,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
     return _create_orphan_coordination_worktree(repo_root, branch, path)
 
 
@@ -339,6 +347,17 @@ def checkout_coordination_branch(repo_root: Path, config: ProjectConfig, path: P
 def branch_exists(repo_root: Path, branch: str) -> bool:
     result = subprocess.run(
         ["git", "show-ref", "--verify", "--quiet", "refs/heads/{0}".format(branch)],
+        cwd=repo_root,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    return result.returncode == 0
+
+
+def remote_branch_exists(repo_root: Path, remote: str, branch: str) -> bool:
+    result = subprocess.run(
+        ["git", "show-ref", "--verify", "--quiet", "refs/remotes/{0}/{1}".format(remote, branch)],
         cwd=repo_root,
         check=False,
         capture_output=True,

@@ -38,7 +38,7 @@ def init_repo(tmp_path: Path, monkeypatch, capsys) -> Path:
         ],
         capsys,
     )
-    assert exit_code == 0
+    assert exit_code == 0, output
     assert "Initialized Agent Mesh" in output
     return repo_root
 
@@ -78,7 +78,7 @@ def init_real_repo(tmp_path: Path, monkeypatch, capsys, *, lanes: int = 0) -> Pa
     if lanes:
         cli_args += ["--lanes", str(lanes)]
     exit_code, output = run_cli(cli_args, capsys)
-    assert exit_code == 0
+    assert exit_code == 0, output
     assert "Initialized Agent Mesh" in output
     return repo_root
 
@@ -201,6 +201,37 @@ def test_init_rerun_skips_existing_files_without_force(tmp_path: Path, monkeypat
     assert exit_code == 0
     assert "Skipped" in output
     assert agents_path.read_text(encoding="utf-8") == "custom instructions\n"
+
+
+def test_init_warns_when_existing_agents_md_lacks_mesh_bootstrap(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    repo_root = tmp_path / "demo-repo"
+    (repo_root / ".git").mkdir(parents=True)
+    agents_path = repo_root / "AGENTS.md"
+    agents_path.write_text("custom instructions\n", encoding="utf-8")
+    monkeypatch.chdir(repo_root)
+
+    exit_code, output = run_cli(
+        [
+            "init",
+            "--project-name",
+            "demo",
+            "--project-key",
+            "APP",
+            "--provider",
+            "local",
+            "--worktree-policy",
+            "off",
+        ],
+        capsys,
+    )
+
+    assert exit_code == 0
+    assert agents_path.read_text(encoding="utf-8") == "custom instructions\n"
+    assert (repo_root / ".agentic/AGENTS-BOOTSTRAP.md").exists()
+    assert "WARNING: brownfield adoption is incomplete" in output
+    assert "merge the bootstrap block from .agentic/AGENTS-BOOTSTRAP.md into AGENTS.md" in output
 
 
 def test_skill_list_shows_adapter_install_status_in_configured_repo(
@@ -980,6 +1011,126 @@ def test_sync_recreates_missing_coordination_worktree(tmp_path: Path, monkeypatc
     assert exit_code == 0
     assert "Coordination worktree created: mesh/state @" in output
     assert coordination_path.exists()
+
+
+def test_fresh_clone_doctor_points_to_sync_before_validating_stale_root_state(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    source = init_real_repo(tmp_path, monkeypatch, capsys)
+    bad_review = source / ".agentic/reviews/PR-OLD.json"
+    bad_review.parent.mkdir(parents=True, exist_ok=True)
+    bad_review.write_text(
+        json.dumps(
+            {
+                "schema_version": "0.1",
+                "id": "PR-OLD",
+                "work_id": "APP-1",
+                "status": "merged",
+                "pr": {"number": 1},
+                "context": {
+                    "work_item": ".agentic/work/APP-1.json",
+                    "claim": ".agentic/claims/APP-1.json",
+                },
+                "created_at": "2026-01-01T00:00:00Z",
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    subprocess.run(
+        ["git", "add", "AGENTS.md", ".agentic"],
+        cwd=source,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "Add legacy root coordination state"],
+        cwd=source,
+        check=True,
+        capture_output=True,
+    )
+
+    remote = tmp_path / "origin.git"
+    subprocess.run(["git", "init", "--bare", str(remote)], check=True, capture_output=True)
+    subprocess.run(
+        ["git", "remote", "add", "origin", str(remote)],
+        cwd=source,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(["git", "push", "origin", "main"], cwd=source, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "push", "origin", "mesh/state"],
+        cwd=source,
+        check=True,
+        capture_output=True,
+    )
+
+    clone = tmp_path / "fresh-clone"
+    subprocess.run(["git", "clone", str(remote), str(clone)], check=True, capture_output=True)
+    monkeypatch.chdir(clone)
+
+    exit_code, output = run_cli(["doctor"], capsys)
+
+    assert exit_code == 1
+    assert "coordination worktree is missing for mesh/state" in output
+    assert "Run `mesh sync`" in output
+    assert "Invalid" not in output
+
+
+def test_sync_bootstraps_coordination_worktree_from_remote_mesh_state(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    source = init_real_repo(tmp_path, monkeypatch, capsys)
+    subprocess.run(["git", "add", "AGENTS.md"], cwd=source, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "Add root bootstrap contract"],
+        cwd=source,
+        check=True,
+        capture_output=True,
+    )
+
+    remote = tmp_path / "origin.git"
+    subprocess.run(["git", "init", "--bare", str(remote)], check=True, capture_output=True)
+    subprocess.run(
+        ["git", "remote", "add", "origin", str(remote)],
+        cwd=source,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(["git", "push", "origin", "main"], cwd=source, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "push", "origin", "mesh/state"],
+        cwd=source,
+        check=True,
+        capture_output=True,
+    )
+
+    clone = tmp_path / "fresh-clone"
+    subprocess.run(["git", "clone", str(remote), str(clone)], check=True, capture_output=True)
+    monkeypatch.chdir(clone)
+
+    exit_code, output = run_cli(["sync"], capsys)
+
+    coordination_path = clone.parent / "fresh-clone-mesh-state"
+    assert exit_code == 0, output
+    assert "Coordination worktree created: mesh/state @" in output
+    assert coordination_path.exists()
+    assert (coordination_path / ".agentic/project.json").exists()
+    branch = subprocess.run(
+        ["git", "branch", "--show-current"],
+        cwd=coordination_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    assert branch == "mesh/state"
+
+    exit_code, output = run_cli(["status", "--skip-dashboard-rebuild"], capsys)
+    assert exit_code == 0
+    assert "Coordination: mesh/state @" in output
+    assert "[ready]" in output
 
 
 def test_coordination_worktree_uses_orphan_branch(tmp_path: Path, monkeypatch, capsys) -> None:
@@ -1936,6 +2087,38 @@ def test_doctor_emits_adapter_install_hint_for_missing_configured_adapter(
     assert exit_code == 1
     assert "Missing adapter artifact directory for codex: .agents/skills" in output
     assert "TIP: Run: mesh adapter install codex" in output
+
+
+def test_doctor_reports_missing_mesh_bootstrap_in_root_agents(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    repo_root = init_repo(tmp_path, monkeypatch, capsys)
+    (repo_root / "AGENTS.md").write_text("custom instructions\n", encoding="utf-8")
+
+    exit_code, output = run_cli(["doctor"], capsys)
+
+    assert exit_code == 1
+    assert (
+        "Root AGENTS.md is missing Agent Mesh startup routing; merge .agentic/AGENTS-BOOTSTRAP.md into AGENTS.md"
+        in output
+    )
+
+
+def test_doctor_emits_repo_runtime_adapter_hint_for_claude_files(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    repo_root = init_repo(tmp_path, monkeypatch, capsys)
+    ensure_dir = repo_root / ".claude"
+    ensure_dir.mkdir(parents=True, exist_ok=True)
+    (repo_root / "CLAUDE.md").write_text("project-specific claude instructions\n", encoding="utf-8")
+
+    exit_code, output = run_cli(["doctor"], capsys)
+
+    assert exit_code == 0
+    assert (
+        "TIP: detected claude runtime files in this repo. To enable Mesh wrappers for this repo, run: mesh adapter install claude"
+        in output
+    )
 
 
 def test_bootstrap_tasks_creates_normalized_work_items_from_stdin(

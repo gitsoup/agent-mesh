@@ -1,0 +1,23 @@
+{
+  "schema_version": "0.1",
+  "work_id": "MESH-4",
+  "status": "in_progress",
+  "claimed_by": "agent:codex:KWG7MJW1H9",
+  "agent_runtime": "codex",
+  "role": "implementer",
+  "machine": "KWG7MJW1H9",
+  "workspace_id": "codex-kwg7mjw1h9",
+  "worktree": "/Users/karthick/code/gitsoup/agent-mesh-codex-kwg7mjw1h9",
+  "branch": "feat/MESH-4-design-brownfield-adoption-and-migration-flow",
+  "claimed_at": "2026-06-15T18:47:27Z",
+  "last_seen": "2026-06-15T18:47:27Z",
+  "evidence": [],
+  "events": [
+    {
+      "action": "claimed",
+      "at": "2026-06-15T18:47:27Z",
+      "by": "agent:codex:KWG7MJW1H9",
+      "note": null
+    }
+  ]
+}

@@ -564,6 +564,12 @@ if [ -z "$MESH_WORKTREE" ]; then exit 0; fi
 CHANGED=$(git diff-tree --no-commit-id -r --name-only HEAD | grep -E '^\\.(agentic/(work|claims)/[^/]+\\.json)$')
 if [ -z "$CHANGED" ]; then exit 0; fi
 
+# Unset git env vars that git sets before invoking hooks. Without this, nested
+# git calls inherit GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE pointing at the
+# current repo, which confuses git when operating on the sibling mesh/state
+# worktree (where .git is a file, not a directory).
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES
+
 COMMITTED=0
 while IFS= read -r REL; do
     SRC="$REPO_ROOT/$REL"

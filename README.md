@@ -7,6 +7,47 @@ The repository is still in early implementation. The current focus is the v0.1
 local-first scaffold described in [AGENTS.md](./AGENTS.md) and the planning docs
 under [docs/](./docs).
 
+## Installing the `mesh` CLI
+
+Install `mesh` globally so any terminal, agent session, or tool can invoke it
+directly without path prefixes or environment variables.
+
+**Recommended — `uv tool` (global install):**
+
+```bash
+git clone <this-repo>
+cd agent-mesh
+uv tool install .
+mesh doctor
+```
+
+**Upgrading after pulling new changes:**
+
+```bash
+cd agent-mesh
+uv cache clean agent-mesh
+uv tool install . --force
+```
+
+**Fallback — pip (if `uv` is unavailable):**
+
+```bash
+pip install -e .
+mesh doctor
+```
+
+> Do NOT use `PYTHONPATH=... /path/to/.venv/bin/mesh` — that approach is
+> fragile, session-scoped, and invisible to other agents. A global install via
+> `uv tool` or `pip install -e .` puts `mesh` on `PATH` so every agent and
+> tool can call it directly.
+
+Once installed, verify with:
+
+```bash
+mesh --help
+mesh doctor
+```
+
 ## Repo Model
 
 Agent Mesh is repo-native.

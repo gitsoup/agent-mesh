@@ -17,7 +17,12 @@ Claim a ready work item and prepare implementation context.
 7. Create or verify a dedicated worktree and task branch unless worktree
    isolation is explicitly disabled by project config.
 8. Create the claim file.
-9. Output the next implementation steps, including the worktree path to enter.
+9. Commit coordination state to `mesh/state`.
+   - In the coordination worktree (find it via `git worktree list`), stage and
+     commit the new claim file from `.agentic/claims/`.
+   - Commit message: `chore(state): claim {TASK-ID} — {short title}`
+   - This makes the claim visible to other agents and the dashboard immediately.
+10. Output the next implementation steps, including the worktree path to enter.
 
 ## Recovery
 

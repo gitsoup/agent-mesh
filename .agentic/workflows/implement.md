@@ -19,3 +19,9 @@ claims, reviews, and handoffs before proceeding.
 7. Record evidence, including the commands run and their outcomes.
 8. Stop only when the task branch is in a deliberate reviewable state, then
    hand off to `/pr` instead of opening a PR directly.
+9. Commit coordination state to `mesh/state`.
+   - In the coordination worktree, stage and commit the updated work item
+     (`.agentic/work/TASK-ID.json`) and claim file (`.agentic/claims/TASK-ID.json`).
+   - Commit message: `chore(state): {TASK-ID} → {new status} — {short title}`
+   - Do this on every status transition: in_progress → done, or in_progress → review.
+   - Do NOT skip this step. It is part of the definition of done.

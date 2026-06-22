@@ -222,6 +222,17 @@ def build_parser() -> argparse.ArgumentParser:
     sync_parser = subparsers.add_parser("sync", help="Refresh local status artifacts.")
     sync_parser.set_defaults(func=handle_sync)
 
+    upgrade_parser = subparsers.add_parser(
+        "upgrade",
+        help="Re-install Mesh-owned definition files (workflows, git hook, examples) without touching coordination state.",
+    )
+    upgrade_parser.add_argument(
+        "--hook-only",
+        action="store_true",
+        help="Only re-install the git post-commit hook.",
+    )
+    upgrade_parser.set_defaults(func=handle_upgrade)
+
     merge_parser = subparsers.add_parser("merge", help="Finalize a merged work item and clean up.")
     merge_parser.add_argument("work_id", help="Work item ID (e.g. APP-1).")
     merge_parser.add_argument("--no-push", action="store_true", help="Skip remote branch deletion.")
@@ -1669,6 +1680,42 @@ def handle_merge(args: argparse.Namespace) -> int:
         emit("Skipped dashboard rebuild due to warnings — run mesh sync to rebuild")
 
     return 2 if warnings_fired else 0
+
+
+def handle_upgrade(args: argparse.Namespace) -> int:
+    from agent_mesh.scaffold import install_git_hook, upgrade_definition_files
+    from agent_mesh.state.storage import resolve_repo_root
+
+    repo_root = resolve_repo_root(Path.cwd())
+
+    if args.hook_only:
+        path, created = install_git_hook(repo_root, force=True)
+        if created:
+            emit("Installed git hook: {0}".format(path))
+        else:
+            emit("Git hook already up to date: {0}".format(path))
+        return 0
+
+    result = upgrade_definition_files(repo_root)
+    for path in result.created:
+        try:
+            label = path.relative_to(repo_root)
+        except ValueError:
+            label = path
+        emit("Updated: {0}".format(label))
+    for path in result.skipped:
+        try:
+            label = path.relative_to(repo_root)
+        except ValueError:
+            label = path
+        emit("Unchanged: {0}".format(label))
+    emit(
+        "Upgrade complete: {0} updated, {1} unchanged.".format(
+            len(result.created), len(result.skipped)
+        )
+    )
+    emit("Coordination state (.agentic/work/, claims/, reviews/, handoffs/) was not modified.")
+    return 0
 
 
 def handle_sync(_: argparse.Namespace) -> int:

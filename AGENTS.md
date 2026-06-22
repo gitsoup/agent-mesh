@@ -6,6 +6,45 @@ You are building **agent-mesh**, a git-native coordination toolkit for parallel 
 
 Agent Mesh turns a normal git repository into a coordinated workspace for humans and AI coding agents. It does not replace coding agents, issue trackers, or CI. It provides the repo protocol, CLI/TUI, workflow skills, adapters, and local automation needed for many agents to work safely in one repo.
 
+## CLI installation
+
+Before running any `mesh` command, the CLI must be installed globally on the
+local machine. This applies to every agent, human developer, and CI runner.
+
+**Install (run once per machine):**
+
+```bash
+cd <agent-mesh repo>
+uv tool install .
+```
+
+**Upgrade after pulling new changes:**
+
+```bash
+cd <agent-mesh repo>
+uv cache clean agent-mesh
+uv tool install . --force
+```
+
+**Fallback if `uv` is unavailable:**
+
+```bash
+pip install -e .
+```
+
+Do NOT invoke mesh via `PYTHONPATH=... /path/to/.venv/bin/mesh` — that is
+fragile and invisible to other agents. A global install puts `mesh` on PATH
+for all agents and tools.
+
+**Apply latest definition files to an existing Mesh repo (after upgrading CLI):**
+
+```bash
+mesh upgrade          # re-installs workflows, git hook, examples — safe, non-destructive
+mesh upgrade --hook-only  # only the git post-commit hook
+```
+
+`mesh upgrade` never touches coordination state (work items, claims, reviews).
+
 ## Startup behavior
 
 Every fresh Claude or Codex session should determine repo mode before choosing a workflow.

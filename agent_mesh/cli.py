@@ -370,14 +370,21 @@ def handle_init(args: argparse.Namespace) -> int:
         coordination_root is not None
         and coordination_root != repo_root
         and coordination is not None
-        and (coordination.action != "noop" or coordination.state == "pending_scaffold")
     ):
-        if _commit_coordination_scaffold(coordination_root):
-            _publish_initial_coordination_state(
-                coordination_root,
-                coordination.branch,
-                no_push=args.no_push,
+        if coordination.state == "pending_scaffold":
+            emit(
+                "WARN: coordination scaffold is pending in {0}. "
+                "Set `git config user.name` and `git config user.email`, then run `mesh sync` to finalize it.".format(
+                    coordination_root
+                )
             )
+        elif coordination.action != "noop":
+            if _commit_coordination_scaffold(coordination_root):
+                _publish_initial_coordination_state(
+                    coordination_root,
+                    coordination.branch,
+                    no_push=args.no_push,
+                )
     # Restore pre-existing lanes and add new ones in a single write cycle.
     if existing_lanes or args.lanes > 0:
         _provision_lanes(repo_root, args.lanes, args.worktree_policy, existing_lanes)
@@ -550,11 +557,11 @@ def _coordination_head_exists(coordination_root: Path) -> bool:
 
 
 def _finalize_pending_coordination_scaffold(coordination_root: Path) -> bool:
+    from agent_mesh.topology import coordination_scaffold_pending
+
     if not coordination_root.exists():
         return False
-    if _coordination_head_exists(coordination_root):
-        return False
-    if not (coordination_root / ".agentic").exists():
+    if not coordination_scaffold_pending(coordination_root):
         return False
     if _commit_coordination_scaffold(coordination_root):
         emit("Committed pending coordination scaffold in {0}".format(coordination_root))

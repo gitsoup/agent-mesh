@@ -91,6 +91,14 @@ def inspect_coordination_worktree(repo_root: Path, config: ProjectConfig) -> Coo
             detail="checked out on {0}".format(active_branch or "<detached>"),
         )
 
+    if coordination_scaffold_pending(path):
+        return CoordinationWorktreeStatus(
+            branch=branch,
+            path=path,
+            state="pending_scaffold",
+            detail="coordination worktree is awaiting its initial scaffold commit",
+        )
+
     dirty = run_git_text(path, ["status", "--porcelain"])
     if dirty is None:
         return CoordinationWorktreeStatus(
@@ -109,6 +117,44 @@ def inspect_coordination_worktree(repo_root: Path, config: ProjectConfig) -> Coo
         )
 
     return CoordinationWorktreeStatus(branch=branch, path=path, state="ready")
+
+
+def coordination_scaffold_pending(path: Path) -> bool:
+    if not (path / ".agentic").exists():
+        return False
+
+    head = run_git_text(path, ["rev-parse", "--verify", "HEAD"])
+    if head is None:
+        return True
+
+    project_tracked = subprocess.run(
+        ["git", "cat-file", "-e", "HEAD:.agentic/project.json"],
+        cwd=path,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if project_tracked.returncode == 0:
+        return False
+
+    dirty = run_git_text(path, ["status", "--porcelain"])
+    if dirty is None or not dirty.strip():
+        return False
+
+    return _status_only_touches_agentic(dirty)
+
+
+def _status_only_touches_agentic(status_output: str) -> bool:
+    for raw_line in status_output.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        path = line[3:]
+        if " -> " in path:
+            path = path.split(" -> ", 1)[1]
+        if not (path == ".agentic" or path.startswith(".agentic/")):
+            return False
+    return True
 
 
 def run_git_text(repo_root: Path, args: list[str]) -> str | None:

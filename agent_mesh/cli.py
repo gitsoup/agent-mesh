@@ -716,7 +716,13 @@ def handle_lane_add(args: argparse.Namespace) -> int:
 
 def handle_status(args: argparse.Namespace) -> int:
     from agent_mesh.config import load_project_config
-    from agent_mesh.state.storage import list_claims, list_effective_work_items, list_reviews, resolve_coordination_root, resolve_repo_root
+    from agent_mesh.state.storage import (
+        list_claims_with_warnings,
+        list_effective_work_items,
+        list_reviews,
+        resolve_coordination_root,
+        resolve_repo_root,
+    )
     from agent_mesh.topology import inspect_coordination_worktree
 
     repo_root = resolve_repo_root(Path.cwd())
@@ -733,7 +739,7 @@ def handle_status(args: argparse.Namespace) -> int:
     coordination_root = resolve_coordination_root(repo_root)
     config = load_project_config(repo_root)
     work_items = list_effective_work_items(repo_root, coordination_root)
-    claims = list_claims(coordination_root)
+    claims, claim_warnings = list_claims_with_warnings(coordination_root)
     reviews = list_reviews(coordination_root)
     coordination = inspect_coordination_worktree(repo_root, config)
 
@@ -752,6 +758,8 @@ def handle_status(args: argparse.Namespace) -> int:
     for line in summarize_work_items(work_items):
         emit(line)
     emit("Claims: {0}".format(len(claims)))
+    for warning in claim_warnings:
+        emit(warning)
     for line in summarize_claims(claims, config.coordination.claim_stale_after_minutes):
         emit(line)
     emit("Reviews: {0}".format(len(reviews)))

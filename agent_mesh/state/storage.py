@@ -87,6 +87,66 @@ def load_model(path: Path, model_type: Type[T]) -> T:
     return model_type.model_validate(load_json(path))
 
 
+def _claim_now() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _normalize_claim_payload(path: Path, raw: Any) -> tuple[dict[str, Any], str | None]:
+    if not isinstance(raw, dict):
+        raise TypeError("claim file must contain a JSON object")
+
+    if "work_id" in raw:
+        payload = {key: raw[key] for key in Claim.model_fields if key in raw}
+        if "schema_version" not in payload:
+            payload["schema_version"] = "0.1"
+        return payload, None
+
+    legacy_id = raw.get("task_id") or raw.get("id")
+    if not legacy_id:
+        raise ValueError("missing work_id")
+
+    agent_runtime = str(raw.get("agent_runtime") or raw.get("agent") or "legacy")
+    machine = str(raw.get("machine") or "legacy")
+    claimed_at = str(raw.get("claimed_at") or raw.get("created_at") or _claim_now())
+    claimed_by = str(raw.get("claimed_by") or "agent:{0}:{1}".format(agent_runtime, machine))
+    events = raw.get("events") if isinstance(raw.get("events"), list) else []
+    if not events and raw.get("notes"):
+        events = [
+            {
+                "action": "claimed",
+                "at": claimed_at,
+                "by": claimed_by,
+                "note": str(raw.get("notes")),
+            }
+        ]
+
+    payload = {
+        "schema_version": raw.get("schema_version", "0.1"),
+        "work_id": str(legacy_id),
+        "status": str(raw.get("status") or "in_progress"),
+        "claimed_by": claimed_by,
+        "agent_runtime": agent_runtime,
+        "role": str(raw.get("role") or "implementer"),
+        "machine": machine,
+        "workspace_id": raw.get("workspace_id"),
+        "worktree": raw.get("worktree"),
+        "branch": str(raw.get("branch") or "feat/{0}".format(legacy_id)),
+        "claimed_at": claimed_at,
+        "last_seen": str(raw.get("last_seen") or claimed_at),
+        "evidence": raw.get("evidence") if isinstance(raw.get("evidence"), list) else [],
+        "events": events,
+    }
+    warning = "Legacy claim schema detected in {0}; Mesh normalized it for this run. Re-save or re-claim it to refresh the file.".format(
+        path.name
+    )
+    return payload, warning
+
+
+def load_claim(path: Path) -> tuple[Claim, str | None]:
+    payload, warning = _normalize_claim_payload(path, load_json(path))
+    return Claim.model_validate(payload), warning
+
+
 def iter_json_files(path: Path) -> Iterable[Path]:
     if not path.exists():
         return []
@@ -118,7 +178,29 @@ def resolve_live_work_item_path(coordination_root: Path, work_id: str) -> Path:
 
 
 def list_claims(repo_root: Path) -> List[Claim]:
-    return [load_model(path, Claim) for path in iter_json_files(repo_root / ".agentic/claims")]
+    claims: List[Claim] = []
+    for path in iter_json_files(repo_root / ".agentic/claims"):
+        try:
+            claim, _ = load_claim(path)
+        except Exception:
+            continue
+        claims.append(claim)
+    return claims
+
+
+def list_claims_with_warnings(repo_root: Path) -> tuple[List[Claim], List[str]]:
+    claims: List[Claim] = []
+    warnings: List[str] = []
+    for path in iter_json_files(repo_root / ".agentic/claims"):
+        try:
+            claim, warning = load_claim(path)
+        except Exception as error:
+            warnings.append("WARNING: skipping invalid claim {0}: {1}".format(path.name, error))
+            continue
+        claims.append(claim)
+        if warning:
+            warnings.append("WARNING: {0}".format(warning))
+    return claims, warnings
 
 
 def list_reviews(repo_root: Path) -> List[ReviewPacket]:

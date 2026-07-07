@@ -2566,6 +2566,37 @@ def test_mesh_status_shows_active_after_last_seen_refresh_from_worktree(
     assert "[stale]" not in output
 
 
+def test_mesh_status_warns_on_legacy_claim_schema(tmp_path: Path, monkeypatch, capsys) -> None:
+    repo_root = init_repo(tmp_path, monkeypatch, capsys)
+    run_cli(["task", "add", "Implement auth endpoint", "--module", "api"], capsys)
+
+    legacy_claim_path = repo_root / ".agentic/claims/APP-1.json"
+    legacy_claim_path.parent.mkdir(parents=True, exist_ok=True)
+    legacy_claim_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "0.1",
+                "task_id": "APP-1",
+                "agent": "claude-code",
+                "branch": "feat/APP-1-auth-endpoint",
+                "worktree": None,
+                "claimed_at": "2026-05-17T00:00:00Z",
+                "status": "in_progress",
+                "notes": "legacy claim payload",
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    exit_code, output = run_cli(["status"], capsys)
+    assert exit_code == 0
+    assert "Legacy claim schema detected in APP-1.json" in output
+    assert "Claims: 1" in output
+    assert "APP-1" in output
+
+
 def test_last_seen_not_refreshed_from_outside_worktree(tmp_path: Path, monkeypatch, capsys) -> None:
     repo_root, coordination_root, claim = _setup_repo_with_claim(tmp_path, monkeypatch, capsys)
 

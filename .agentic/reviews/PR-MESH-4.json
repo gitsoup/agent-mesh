@@ -1,16 +1,28 @@
 {
   "schema_version": "0.1",
+  "type": "review_request",
+  "id": "PR-MESH-4",
   "work_id": "MESH-4",
-  "status": "in_progress",
-  "claimed_by": "agent:codex:KWG7MJW1H9",
-  "agent_runtime": "codex",
-  "role": "implementer",
-  "machine": "KWG7MJW1H9",
-  "workspace_id": "codex-kwg7mjw1h9",
-  "worktree": "/Users/karthick/code/gitsoup/agent-mesh-codex-kwg7mjw1h9",
-  "branch": "feat/MESH-4-design-brownfield-adoption-and-migration-flow",
-  "claimed_at": "2026-06-15T18:47:27Z",
-  "last_seen": "2026-06-15T22:18:14Z",
+  "pr": {
+    "number": 17,
+    "url": "https://github.com/gitsoup/agent-mesh/pull/17",
+    "branch": "feat/MESH-4-design-brownfield-adoption-and-migration-flow",
+    "base": "main"
+  },
+  "author": {
+    "agent_runtime": "codex",
+    "role": "implementer"
+  },
+  "requested_role": "reviewer",
+  "context": {
+    "work_item": ".agentic/work/MESH-4.json",
+    "claim": ".agentic/claims/MESH-4.json",
+    "prd": null,
+    "context_files": [
+      ".agentic/context/CONTEXT.md",
+      ".agentic/context/CONTEXT-MAP.md"
+    ]
+  },
   "evidence": [
     {
       "kind": "test",
@@ -39,14 +51,15 @@
       "result": "pass",
       "summary": "118 passed",
       "created_at": "2026-06-15T22:18:14Z"
+    },
+    {
+      "kind": "test",
+      "command": "uv run --extra dev pytest",
+      "result": "pass",
+      "summary": "118 passed in 43.76s after fixing pending coordination scaffold detection and sync finalization",
+      "created_at": "2026-07-07T22:11:53Z"
     }
   ],
-  "events": [
-    {
-      "action": "claimed",
-      "at": "2026-06-15T18:47:27Z",
-      "by": "agent:codex:KWG7MJW1H9",
-      "note": null
-    }
-  ]
+  "status": "merged",
+  "created_at": "2026-07-07T22:18:02Z"
 }

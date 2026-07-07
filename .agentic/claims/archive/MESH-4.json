@@ -1,0 +1,59 @@
+{
+  "schema_version": "0.1",
+  "work_id": "MESH-4",
+  "status": "in_progress",
+  "claimed_by": "agent:codex:KWG7MJW1H9",
+  "agent_runtime": "codex",
+  "role": "implementer",
+  "machine": "KWG7MJW1H9",
+  "workspace_id": "codex-kwg7mjw1h9",
+  "worktree": "/Users/karthick/code/gitsoup/agent-mesh-codex-kwg7mjw1h9",
+  "branch": "feat/MESH-4-design-brownfield-adoption-and-migration-flow",
+  "claimed_at": "2026-06-15T18:47:27Z",
+  "last_seen": "2026-07-07T22:18:02Z",
+  "evidence": [
+    {
+      "kind": "test",
+      "command": "uv run --extra dev pytest tests/test_workflow.py::test_init_publishes_coordination_branch_by_default_when_origin_exists tests/test_workflow.py::test_init_no_push_warns_that_coordination_is_local_only tests/test_workflow.py::test_init_refuses_when_remote_mesh_state_already_exists",
+      "result": "pass",
+      "summary": "3 passed",
+      "created_at": "2026-06-15T20:16:16Z"
+    },
+    {
+      "kind": "test",
+      "command": "uv run --extra dev pytest",
+      "result": "pass",
+      "summary": "118 passed",
+      "created_at": "2026-06-15T20:16:16Z"
+    },
+    {
+      "kind": "test",
+      "command": "uv run --extra dev pytest tests/test_workflow.py::test_init_creates_agentic_scaffold tests/test_workflow.py::test_init_creates_coordination_worktree_for_real_git_repo tests/test_workflow.py::test_adoption_report_detects_ongoing_mesh_repo tests/test_workflow.py::test_bootstrap_tasks_creates_normalized_work_items_from_stdin tests/test_workflow.py::test_bootstrap_tasks_updates_existing_work_item_from_input_file",
+      "result": "pass",
+      "summary": "5 passed",
+      "created_at": "2026-06-15T22:18:14Z"
+    },
+    {
+      "kind": "test",
+      "command": "uv run --extra dev pytest",
+      "result": "pass",
+      "summary": "118 passed",
+      "created_at": "2026-06-15T22:18:14Z"
+    },
+    {
+      "kind": "test",
+      "command": "uv run --extra dev pytest",
+      "result": "pass",
+      "summary": "118 passed in 43.76s after fixing pending coordination scaffold detection and sync finalization",
+      "created_at": "2026-07-07T22:11:53Z"
+    }
+  ],
+  "events": [
+    {
+      "action": "claimed",
+      "at": "2026-06-15T18:47:27Z",
+      "by": "agent:codex:KWG7MJW1H9",
+      "note": null
+    }
+  ]
+}

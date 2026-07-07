@@ -146,6 +146,11 @@ def test_init_creates_agentic_scaffold(tmp_path: Path, monkeypatch, capsys) -> N
     assert project["coordination"]["branch"] == "mesh/state"
     assert project["coordination"]["coordination_worktree"] is None
     assert (repo_root / ".agentic/context/CONTEXT.md").exists()
+    bootstrap_example = repo_root / ".agentic/examples/bootstrap-tasks.json"
+    assert bootstrap_example.exists()
+    bootstrap_payload = json.loads(bootstrap_example.read_text(encoding="utf-8"))
+    assert len(bootstrap_payload["tasks"]) == 2
+    assert bootstrap_payload["tasks"][0]["title"] == "Map existing architecture and ownership"
     assert (repo_root / ".agentic/workflows/claim.md").exists()
     assert (repo_root / ".agentic/workflows/ongoing.md").exists()
     ongoing = (repo_root / ".agentic/workflows/ongoing.md").read_text(encoding="utf-8")
@@ -232,6 +237,47 @@ def test_init_warns_when_existing_agents_md_lacks_mesh_bootstrap(
     assert (repo_root / ".agentic/AGENTS-BOOTSTRAP.md").exists()
     assert "WARNING: brownfield adoption is incomplete" in output
     assert "merge the bootstrap block from .agentic/AGENTS-BOOTSTRAP.md into AGENTS.md" in output
+
+
+def test_adoption_report_detects_brownfield_sources_before_init(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    repo_root = tmp_path / "demo-repo"
+    (repo_root / ".git").mkdir(parents=True)
+    (repo_root / "README.md").write_text("# Existing product\n", encoding="utf-8")
+    (repo_root / "AGENTS.md").write_text("custom agent rules\n", encoding="utf-8")
+    (repo_root / "docs").mkdir()
+    (repo_root / "docs/TASKS.md").write_text("- Existing task\n", encoding="utf-8")
+    (repo_root / ".github/ISSUE_TEMPLATE").mkdir(parents=True)
+    (repo_root / "linear.json").write_text('{"team": "ENG"}\n', encoding="utf-8")
+    monkeypatch.chdir(repo_root)
+
+    exit_code, output = run_cli(["adoption", "report"], capsys)
+
+    assert exit_code == 0
+    assert "Repo mode: brownfield adoption" in output
+    assert "Mesh state: missing" in output
+    assert "Root AGENTS.md: missing Mesh bootstrap" in output
+    assert "README.md" in output
+    assert "docs/TASKS.md" in output
+    assert ".github/ISSUE_TEMPLATE" in output
+    assert "linear.json" in output
+    assert "mesh bootstrap-tasks" in output
+
+
+def test_adoption_report_detects_ongoing_mesh_repo(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    repo_root = init_repo(tmp_path, monkeypatch, capsys)
+
+    exit_code, output = run_cli(["adoption", "report"], capsys)
+
+    assert exit_code == 0
+    assert "Repo mode: ongoing coordination" in output
+    assert "Mesh state: present" in output
+    assert "Run `mesh doctor` and `mesh status` before claiming work." in output
+    assert ".agentic/examples/bootstrap-tasks.json" in output
+    assert "mesh bootstrap-tasks --input <file>" in output
 
 
 def test_skill_list_shows_adapter_install_status_in_configured_repo(
@@ -747,6 +793,7 @@ def test_init_creates_coordination_worktree_for_real_git_repo(
     project = json.loads((repo_root / ".agentic/project.json").read_text(encoding="utf-8"))
     coordination_path = repo_root.parent / "{0}-mesh-state".format(repo_root.name)
     assert coordination_path.exists()
+    assert (coordination_path / ".agentic/examples/bootstrap-tasks.json").exists()
     assert (
         subprocess.run(
             ["git", "branch", "--show-current"],
@@ -757,6 +804,116 @@ def test_init_creates_coordination_worktree_for_real_git_repo(
         ).stdout.strip()
         == project["coordination"]["branch"]
     )
+
+
+def test_init_publishes_coordination_branch_by_default_when_origin_exists(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    repo_root = tmp_path / "demo-repo"
+    remote = tmp_path / "origin.git"
+    repo_root.mkdir(parents=True)
+    subprocess.run(["git", "init", "-b", "main"], cwd=repo_root, check=True, capture_output=True)
+    subprocess.run(["git", "init", "--bare", str(remote)], check=True, capture_output=True)
+    subprocess.run(["git", "remote", "add", "origin", str(remote)], cwd=repo_root, check=True)
+    subprocess.run(
+        ["git", "config", "user.email", "mesh@example.com"],
+        cwd=repo_root,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Agent Mesh Tests"],
+        cwd=repo_root,
+        check=True,
+        capture_output=True,
+    )
+    (repo_root / "README.md").write_text("demo\n", encoding="utf-8")
+    subprocess.run(["git", "add", "README.md"], cwd=repo_root, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "initial"], cwd=repo_root, check=True, capture_output=True)
+    subprocess.run(["git", "push", "-u", "origin", "main"], cwd=repo_root, check=True, capture_output=True)
+    monkeypatch.chdir(repo_root)
+
+    exit_code, output = run_cli(
+        [
+            "init",
+            "--project-name",
+            "demo",
+            "--project-key",
+            "APP",
+            "--provider",
+            "local",
+            "--worktree-policy",
+            "required",
+        ],
+        capsys,
+    )
+
+    assert exit_code == 0
+    assert "Published coordination branch: origin/mesh/state" in output
+    remote_ref = subprocess.run(
+        ["git", "ls-remote", "--heads", "origin", "mesh/state"],
+        cwd=repo_root,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert "refs/heads/mesh/state" in remote_ref.stdout
+
+
+def test_init_no_push_warns_that_coordination_is_local_only(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    repo_root = tmp_path / "demo-repo"
+    remote = tmp_path / "origin.git"
+    repo_root.mkdir(parents=True)
+    subprocess.run(["git", "init", "-b", "main"], cwd=repo_root, check=True, capture_output=True)
+    subprocess.run(["git", "init", "--bare", str(remote)], check=True, capture_output=True)
+    subprocess.run(["git", "remote", "add", "origin", str(remote)], cwd=repo_root, check=True)
+    subprocess.run(
+        ["git", "config", "user.email", "mesh@example.com"],
+        cwd=repo_root,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Agent Mesh Tests"],
+        cwd=repo_root,
+        check=True,
+        capture_output=True,
+    )
+    (repo_root / "README.md").write_text("demo\n", encoding="utf-8")
+    subprocess.run(["git", "add", "README.md"], cwd=repo_root, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "initial"], cwd=repo_root, check=True, capture_output=True)
+    subprocess.run(["git", "push", "-u", "origin", "main"], cwd=repo_root, check=True, capture_output=True)
+    monkeypatch.chdir(repo_root)
+
+    exit_code, output = run_cli(
+        [
+            "init",
+            "--project-name",
+            "demo",
+            "--project-key",
+            "APP",
+            "--provider",
+            "local",
+            "--worktree-policy",
+            "required",
+            "--no-push",
+        ],
+        capsys,
+    )
+
+    assert exit_code == 0
+    assert "created locally but not pushed (--no-push)" in output
+    assert "other clones cannot discover Mesh coordination state" in output
+    remote_ref = subprocess.run(
+        ["git", "ls-remote", "--heads", "origin", "mesh/state"],
+        cwd=repo_root,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert remote_ref.stdout == ""
 
 
 def test_init_without_git_identity_fails_preflight_before_writing_state(
@@ -1131,6 +1288,59 @@ def test_sync_bootstraps_coordination_worktree_from_remote_mesh_state(
     assert exit_code == 0
     assert "Coordination: mesh/state @" in output
     assert "[ready]" in output
+
+
+def test_init_refuses_when_remote_mesh_state_already_exists(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    source = init_real_repo(tmp_path, monkeypatch, capsys)
+    subprocess.run(["git", "add", "AGENTS.md"], cwd=source, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "Add root bootstrap contract"],
+        cwd=source,
+        check=True,
+        capture_output=True,
+    )
+
+    remote = tmp_path / "origin.git"
+    subprocess.run(["git", "init", "--bare", str(remote)], check=True, capture_output=True)
+    subprocess.run(
+        ["git", "remote", "add", "origin", str(remote)],
+        cwd=source,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(["git", "push", "origin", "main"], cwd=source, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "push", "origin", "mesh/state"],
+        cwd=source,
+        check=True,
+        capture_output=True,
+    )
+
+    clone = tmp_path / "fresh-clone"
+    subprocess.run(["git", "clone", str(remote), str(clone)], check=True, capture_output=True)
+    monkeypatch.chdir(clone)
+
+    exit_code, output = run_cli(
+        [
+            "init",
+            "--project-name",
+            "demo",
+            "--project-key",
+            "APP",
+            "--provider",
+            "local",
+            "--worktree-policy",
+            "required",
+        ],
+        capsys,
+    )
+
+    assert exit_code == 1
+    assert "Mesh coordination state already exists at origin/mesh/state" in output
+    assert "Run `mesh sync`" in output
+    assert not (clone.parent / "fresh-clone-mesh-state").exists()
 
 
 def test_coordination_worktree_uses_orphan_branch(tmp_path: Path, monkeypatch, capsys) -> None:

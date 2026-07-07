@@ -193,6 +193,7 @@ def init_repo(
         repo_root / ".agentic",
         repo_root / ".agentic/context",
         repo_root / ".agentic/context/adr",
+        repo_root / ".agentic/examples",
         repo_root / ".agentic/workflows",
         repo_root / ".agentic/skills",
         repo_root / ".agentic/adapters",
@@ -201,6 +202,7 @@ def init_repo(
     # Live-state directories go to state_root (= coordination_root when set)
     state_directories = [
         state_root / ".agentic",
+        state_root / ".agentic/examples",
         state_root / ".agentic/work",
         state_root / ".agentic/claims",
         state_root / ".agentic/claims/archive",
@@ -265,6 +267,15 @@ def init_repo(
         created,
         skipped,
     )
+    record_result(
+        write_text(
+            repo_root / ".agentic/examples/bootstrap-tasks.json",
+            render_bootstrap_tasks_example(project_key),
+            force=force,
+        ),
+        created,
+        skipped,
+    )
     if state_root != repo_root:
         record_result(
             write_json(state_root / ".agentic/project.json", config.model_dump(), force=True),
@@ -321,6 +332,15 @@ def init_repo(
                     "Store architecture decision records here when decisions are durable "
                     "and hard to reverse.\n"
                 ),
+                force=force,
+            ),
+            created,
+            skipped,
+        )
+        record_result(
+            write_text(
+                state_root / ".agentic/examples/bootstrap-tasks.json",
+                render_bootstrap_tasks_example(project_key),
                 force=force,
             ),
             created,
@@ -395,10 +415,178 @@ def init_repo(
         skipped,
     )
 
+    record_result(
+        install_git_hook(repo_root, force=force),
+        created,
+        skipped,
+    )
+
     adapter_result = install_adapters(repo_root, selected_adapters, force=force)
     created.extend(adapter_result.created)
     skipped.extend(adapter_result.skipped)
     return InitResult(created=created, skipped=skipped)
+
+
+def upgrade_definition_files(repo_root: Path) -> InitResult:
+    """Re-install Mesh-owned definition files without touching coordination state.
+
+    Safe to run on any repo that has already had `mesh init`. Updates:
+    - .agentic/workflows/*.md
+    - .agentic/skills/*/SKILL.md
+    - .agentic/examples/bootstrap-tasks.json
+    - .agentic/AGENTS-BOOTSTRAP.md
+    - .github/workflows/agent-mesh-status.yml
+    - .git/hooks/post-commit (the mesh sync hook)
+
+    Does NOT touch: project.json, work/, claims/, reviews/, handoffs/,
+    AGENTS.md, CONTEXT.md, CONTEXT-MAP.md, or any user-authored files.
+    """
+    from agent_mesh.config import load_project_config
+    from agent_mesh.state.storage import resolve_coordination_root
+
+    created: List[Path] = []
+    skipped: List[Path] = []
+
+    try:
+        config = load_project_config(repo_root)
+        project_key = config.project_key
+        project_name = config.project_name
+    except FileNotFoundError:
+        raise RuntimeError(
+            "No .agentic/project.json found. Run `mesh init` first."
+        )
+
+    state_root = resolve_coordination_root(repo_root)
+
+    # Workflow and skill definition files (Mesh-authored, always safe to overwrite)
+    for skill in SKILLS:
+        for root in {repo_root, state_root}:
+            record_result(
+                write_text(
+                    root / ".agentic/workflows" / "{0}.md".format(skill.name),
+                    render_workflow(skill),
+                    force=True,
+                ),
+                created,
+                skipped,
+            )
+            skill_dir = root / ".agentic/skills" / skill.name
+            ensure_directory(skill_dir)
+            record_result(
+                write_text(skill_dir / "SKILL.md", render_skill(skill), force=True),
+                created,
+                skipped,
+            )
+
+    # Bootstrap example (Mesh-authored template, not user coordination state)
+    for root in {repo_root, state_root}:
+        record_result(
+            write_text(
+                root / ".agentic/examples/bootstrap-tasks.json",
+                render_bootstrap_tasks_example(project_key),
+                force=True,
+            ),
+            created,
+            skipped,
+        )
+        record_result(
+            write_text(
+                root / ".agentic/AGENTS-BOOTSTRAP.md",
+                render_agents_bootstrap_snippet(project_name),
+                force=True,
+            ),
+            created,
+            skipped,
+        )
+
+    # GitHub Actions workflow
+    record_result(
+        write_text(
+            repo_root / ".github/workflows/agent-mesh-status.yml",
+            render_status_workflow(),
+            force=True,
+        ),
+        created,
+        skipped,
+    )
+
+    # Git hook (idempotent — appends if third-party hook exists)
+    record_result(install_git_hook(repo_root, force=True), created, skipped)
+
+    return InitResult(created=created, skipped=skipped)
+
+
+def install_git_hook(repo_root: Path, force: bool = False) -> tuple[Path, bool]:
+    """Install a post-commit git hook that auto-syncs .agentic/ state to mesh/state.
+
+    Works for any agent (Claude Code, Codex, Cursor, etc.) — fires on every git commit.
+    If a post-commit hook already exists and force=False, the hook is not overwritten;
+    instead the mesh sync call is appended only if not already present.
+    """
+    hooks_dir = repo_root / ".git" / "hooks"
+    if not hooks_dir.exists():
+        return hooks_dir / "post-commit", False  # not a real git repo yet
+
+    hook_path = hooks_dir / "post-commit"
+    mesh_marker = "# mesh-state-sync"
+    hook_body = render_git_post_commit_hook()
+
+    if hook_path.exists() and not force:
+        existing = hook_path.read_text(encoding="utf-8")
+        if mesh_marker in existing:
+            return hook_path, False  # already installed
+        # Append to existing hook rather than overwriting
+        updated = existing.rstrip("\n") + "\n\n" + hook_body
+        hook_path.write_text(updated, encoding="utf-8")
+        hook_path.chmod(0o755)
+        return hook_path, True
+
+    hook_path.write_text(hook_body, encoding="utf-8")
+    hook_path.chmod(0o755)
+    return hook_path, True
+
+
+def render_git_post_commit_hook() -> str:
+    return """\
+#!/bin/bash
+# mesh-state-sync
+# Auto-syncs .agentic/work/ and .agentic/claims/ changes to the mesh/state
+# coordination worktree after every commit. Works for any agent or tool.
+
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"
+if [ -z "$REPO_ROOT" ]; then exit 0; fi
+
+# Find the mesh/state worktree
+MESH_WORKTREE=$(git worktree list --porcelain | awk '/^worktree/{wt=$2} /^branch refs\\/heads\\/mesh\\/state/{print wt}')
+if [ -z "$MESH_WORKTREE" ]; then exit 0; fi
+
+# Collect .agentic/work/ and .agentic/claims/ files changed in this commit
+CHANGED=$(git diff-tree --no-commit-id -r --name-only HEAD | grep -E '^\\.(agentic/(work|claims)/[^/]+\\.json)$')
+if [ -z "$CHANGED" ]; then exit 0; fi
+
+# Unset git env vars that git sets before invoking hooks. Without this, nested
+# git calls inherit GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE pointing at the
+# current repo, which confuses git when operating on the sibling mesh/state
+# worktree (where .git is a file, not a directory).
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES
+
+COMMITTED=0
+while IFS= read -r REL; do
+    SRC="$REPO_ROOT/$REL"
+    DST="$MESH_WORKTREE/$REL"
+    if [ ! -f "$SRC" ]; then continue; fi
+    mkdir -p "$(dirname "$DST")"
+    cp "$SRC" "$DST"
+    git -C "$MESH_WORKTREE" add "$REL"
+    COMMITTED=1
+done <<< "$CHANGED"
+
+if [ "$COMMITTED" -eq 0 ]; then exit 0; fi
+git -C "$MESH_WORKTREE" diff --cached --quiet && exit 0
+
+TASK_IDS=$(echo "$CHANGED" | xargs -I{} basename {} .json | tr '\\n' ',' | sed 's/,$//')
+git -C "$MESH_WORKTREE" commit -m "chore(state): sync $TASK_IDS [post-commit]" --no-gpg-sign
+"""
 
 
 def install_adapters(repo_root: Path, adapters: Iterable[str], force: bool = False) -> InitResult:
@@ -669,6 +857,54 @@ claim_stale_after_minutes = {9}
         config.coordination.worktree_policy,
         config.coordination.claim_stale_after_minutes,
     )
+
+
+def render_bootstrap_tasks_example(project_key: str) -> str:
+    example = {
+        "tasks": [
+            {
+                "title": "Map existing architecture and ownership",
+                "description": (
+                    "Review current docs, code boundaries, and known owner areas before "
+                    "creating implementation work."
+                ),
+                "kind": "research",
+                "module": "adoption",
+                "status": "needs_triage",
+                "execution": "hitl",
+                "risk": "low",
+                "acceptance_criteria": [
+                    "Key modules and ownership boundaries are documented",
+                    "Existing planning sources are listed without importing claims automatically",
+                    "Coordination state committed to mesh/state on claim and on completion",
+                ],
+            },
+            {
+                "id": "{0}-2".format(project_key),
+                "title": "Create first implementation slice",
+                "description": (
+                    "Convert one reviewed brownfield improvement into a ready Mesh work item."
+                ),
+                "kind": "feature",
+                "module": "example",
+                "status": "ready",
+                "execution": "afk_safe",
+                "risk": "medium",
+                "planning": {
+                    "provider": "local",
+                    "url": None,
+                    "external_id": None,
+                },
+                "acceptance_criteria": [
+                    "Scope is small enough for one claim",
+                    "Expected verification command is clear",
+                    "Coordination state committed to mesh/state on claim and on completion",
+                ],
+                "dependencies": [],
+            },
+        ]
+    }
+    return json.dumps(example, indent=2) + "\n"
 
 
 def render_workflow(skill: SkillDefinition) -> str:

@@ -38,7 +38,13 @@ Responsibilities:
 - Create `.agentic/` state and context files.
 - Generate `AGENTS.md` and adapter files.
 - Route greenfield repos into `/align`, `/to-prd`, and `/to-tasks`.
-- Route brownfield repos into context derivation and normalization before task creation.
+- Route brownfield repos through `mesh adoption report`, context derivation, and
+  normalization before task creation.
+- Preserve existing Linear/GitHub/TODO work as planning sources until the user
+  explicitly imports or bootstraps Mesh work items.
+- Publish `mesh/state` during init by default when a remote exists; if the user
+  opts out or no remote exists, warn that coordination is local-only until the
+  branch is pushed.
 - Refuse to overwrite usable Mesh state without explicit confirmation.
 
 ## 2. /align

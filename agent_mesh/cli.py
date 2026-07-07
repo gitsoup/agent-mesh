@@ -83,6 +83,16 @@ def build_parser() -> argparse.ArgumentParser:
     init_parser.add_argument("--worktree-root")
     init_parser.add_argument("--claim-stale-after-minutes", type=int, default=120)
     init_parser.add_argument("--lanes", type=int, default=0, help="Number of lane worktrees to provision.")
+    init_parser.add_argument(
+        "--no-push",
+        action="store_true",
+        help="Do not publish the mesh/state coordination branch during init.",
+    )
+    init_parser.add_argument(
+        "--yes",
+        action="store_true",
+        help="Deprecated compatibility flag; mesh init publishes mesh/state by default when origin exists.",
+    )
     init_parser.set_defaults(func=handle_init)
 
     doctor_parser = subparsers.add_parser("doctor", help="Validate Agent Mesh config and state.")
@@ -117,6 +127,14 @@ def build_parser() -> argparse.ArgumentParser:
     adapter_install_parser.add_argument("adapters")
     adapter_install_parser.add_argument("--force", action="store_true")
     adapter_install_parser.set_defaults(func=handle_adapter_install)
+
+    adoption_parser = subparsers.add_parser("adoption", help="Brownfield adoption commands.")
+    adoption_subparsers = adoption_parser.add_subparsers(dest="adoption_command")
+    adoption_report_parser = adoption_subparsers.add_parser(
+        "report",
+        help="Inspect an existing repo and recommend a safe Mesh adoption path.",
+    )
+    adoption_report_parser.set_defaults(func=handle_adoption_report)
 
     task_parser = subparsers.add_parser("task", help="Work item commands.")
     task_subparsers = task_parser.add_subparsers(dest="task_command")
@@ -204,6 +222,17 @@ def build_parser() -> argparse.ArgumentParser:
     sync_parser = subparsers.add_parser("sync", help="Refresh local status artifacts.")
     sync_parser.set_defaults(func=handle_sync)
 
+    upgrade_parser = subparsers.add_parser(
+        "upgrade",
+        help="Re-install Mesh-owned definition files (workflows, git hook, examples) without touching coordination state.",
+    )
+    upgrade_parser.add_argument(
+        "--hook-only",
+        action="store_true",
+        help="Only re-install the git post-commit hook.",
+    )
+    upgrade_parser.set_defaults(func=handle_upgrade)
+
     merge_parser = subparsers.add_parser("merge", help="Finalize a merged work item and clean up.")
     merge_parser.add_argument("work_id", help="Work item ID (e.g. APP-1).")
     merge_parser.add_argument("--no-push", action="store_true", help="Skip remote branch deletion.")
@@ -239,7 +268,11 @@ def handle_init(args: argparse.Namespace) -> int:
     from agent_mesh.config import load_project_config
     from agent_mesh.scaffold import has_mesh_agents_bootstrap, init_repo
     from agent_mesh.state.storage import resolve_repo_root
-    from agent_mesh.topology import ensure_coordination_worktree, inspect_coordination_worktree
+    from agent_mesh.topology import (
+        ensure_coordination_worktree,
+        inspect_coordination_worktree,
+        remote_branch_exists,
+    )
 
     try:
         repo_root = resolve_repo_root(Path.cwd())
@@ -254,6 +287,18 @@ def handle_init(args: argparse.Namespace) -> int:
     adapters = parse_csv(args.adapters)
     existing_project = repo_root / ".agentic/project.json"
     had_existing_agents = (repo_root / "AGENTS.md").exists()
+
+    if (
+        not args.force
+        and not existing_project.exists()
+        and args.worktree_policy != "off"
+        and git_head_available(repo_root)
+        and remote_branch_exists(repo_root, "origin", "mesh/state")
+    ):
+        emit("ERROR: Mesh coordination state already exists at origin/mesh/state.")
+        emit("Run `mesh sync` to create the local coordination worktree for this clone.")
+        emit("Use `mesh init --force` only for intentional adoption repair.")
+        return 1
 
     if args.worktree_policy != "off" and git_head_available(repo_root):
         identity_required = not existing_project.exists()
@@ -325,9 +370,21 @@ def handle_init(args: argparse.Namespace) -> int:
         coordination_root is not None
         and coordination_root != repo_root
         and coordination is not None
-        and (coordination.action != "noop" or coordination.state == "pending_scaffold")
     ):
-        _commit_coordination_scaffold(coordination_root)
+        if coordination.state == "pending_scaffold":
+            emit(
+                "WARN: coordination scaffold is pending in {0}. "
+                "Set `git config user.name` and `git config user.email`, then run `mesh sync` to finalize it.".format(
+                    coordination_root
+                )
+            )
+        elif coordination.action != "noop":
+            if _commit_coordination_scaffold(coordination_root):
+                _publish_initial_coordination_state(
+                    coordination_root,
+                    coordination.branch,
+                    no_push=args.no_push,
+                )
     # Restore pre-existing lanes and add new ones in a single write cycle.
     if existing_lanes or args.lanes > 0:
         _provision_lanes(repo_root, args.lanes, args.worktree_policy, existing_lanes)
@@ -449,6 +506,45 @@ def _commit_coordination_scaffold(coordination_root: Path) -> bool:
     return True
 
 
+def _publish_initial_coordination_state(
+    coordination_root: Path,
+    branch: str,
+    *,
+    no_push: bool,
+) -> bool:
+    if no_push:
+        emit(
+            "Coordination branch {0} was created locally but not pushed (--no-push).".format(
+                branch
+            )
+        )
+        emit(
+            "WARNING: other clones cannot discover Mesh coordination state until you run: "
+            "git -C {0} push -u origin {1}".format(coordination_root, branch)
+        )
+        return False
+
+    if not coordination_remote_exists(coordination_root):
+        emit("Coordination branch {0} was created locally.".format(branch))
+        emit("WARNING: no git remote named origin is configured for the coordination worktree.")
+        emit("Add a remote, then publish coordination state with:")
+        emit("  git -C {0} push -u origin {1}".format(coordination_root, branch))
+        return False
+
+    result = push_coordination_state(coordination_root, branch)
+    if result.returncode == 0:
+        emit("Published coordination branch: origin/{0}".format(branch))
+        return True
+
+    detail = (result.stderr or result.stdout).strip()
+    emit("WARNING: could not publish coordination branch {0}: {1}".format(branch, detail))
+    emit("Run after fixing remote access: git -C {0} push -u origin {1}".format(
+        coordination_root,
+        branch,
+    ))
+    return False
+
+
 def _coordination_head_exists(coordination_root: Path) -> bool:
     result = subprocess.run(
         ["git", "rev-parse", "--verify", "HEAD"],
@@ -461,11 +557,11 @@ def _coordination_head_exists(coordination_root: Path) -> bool:
 
 
 def _finalize_pending_coordination_scaffold(coordination_root: Path) -> bool:
+    from agent_mesh.topology import coordination_scaffold_pending
+
     if not coordination_root.exists():
         return False
-    if _coordination_head_exists(coordination_root):
-        return False
-    if not (coordination_root / ".agentic").exists():
+    if not coordination_scaffold_pending(coordination_root):
         return False
     if _commit_coordination_scaffold(coordination_root):
         emit("Committed pending coordination scaffold in {0}".format(coordination_root))
@@ -834,6 +930,174 @@ def repo_runtime_adapter_tips(repo_root: Path, config) -> List[str]:
 
 def repo_has_claude_runtime_files(repo_root: Path) -> bool:
     return (repo_root / ".claude").exists() or (repo_root / "CLAUDE.md").exists()
+
+
+def handle_adoption_report(_: argparse.Namespace) -> int:
+    from agent_mesh.scaffold import has_mesh_agents_bootstrap
+    from agent_mesh.state.storage import (
+        list_effective_work_items,
+        resolve_coordination_root,
+        resolve_repo_root,
+    )
+
+    repo_root = resolve_repo_root(Path.cwd())
+    coordination_root = resolve_coordination_root(repo_root)
+    mesh_present = (repo_root / PROJECT_FILE).exists() or (
+        coordination_root != repo_root and (coordination_root / PROJECT_FILE).exists()
+    )
+    product_artifacts = discover_product_artifacts(repo_root)
+    task_sources = discover_task_sources(repo_root)
+    instruction_files = discover_instruction_files(repo_root)
+    planning_sources = discover_planning_sources(repo_root)
+    agents_path = repo_root / "AGENTS.md"
+    agents_bootstrap = has_mesh_agents_bootstrap(agents_path)
+    mesh_work_item_count = 0
+    if mesh_present:
+        try:
+            mesh_work_item_count = len(list_effective_work_items(repo_root, coordination_root))
+        except Exception:
+            mesh_work_item_count = 0
+    bootstrap_example = _bootstrap_tasks_example_path(repo_root, coordination_root)
+
+    if mesh_present:
+        repo_mode = "ongoing coordination"
+    elif product_artifacts or task_sources or instruction_files:
+        repo_mode = "brownfield adoption"
+    else:
+        repo_mode = "greenfield"
+
+    emit("Adoption report")
+    emit("Repo mode: {0}".format(repo_mode))
+    emit("Mesh state: {0}".format("present" if mesh_present else "missing"))
+    if mesh_present:
+        emit("Mesh work items: {0}".format(mesh_work_item_count))
+    if mesh_present and coordination_root != repo_root:
+        emit("Coordination root: {0}".format(coordination_root))
+    emit(
+        "Root AGENTS.md: {0}".format(
+            "mesh bootstrap present"
+            if agents_bootstrap
+            else "missing Mesh bootstrap" if agents_path.exists()
+            else "missing"
+        )
+    )
+    emit_adoption_list("Product/context artifacts", product_artifacts)
+    emit_adoption_list("Instruction/runtime files", instruction_files)
+    emit_adoption_list("Planning/task sources", sorted(set(planning_sources + task_sources)))
+
+    emit("Recommended next steps:")
+    if repo_mode == "greenfield":
+        emit("  - Run `mesh init`, then use /align, /to-prd, and /to-tasks.")
+    elif not mesh_present:
+        emit("  - Run `mesh init` to create Mesh coordination state without importing tasks.")
+        if agents_path.exists() and not agents_bootstrap:
+            emit("  - Merge `.agentic/AGENTS-BOOTSTRAP.md` into root `AGENTS.md` after init.")
+        emit("  - Review the sources above and create/import tasks with `mesh bootstrap-tasks`.")
+        emit(
+            "  - After init, use `.agentic/examples/bootstrap-tasks.json` as the sample task file."
+        )
+        emit("  - Keep external systems such as Linear/GitHub as planning sources; Mesh owns claims.")
+    else:
+        emit("  - Run `mesh doctor` and `mesh status` before claiming work.")
+        if agents_path.exists() and not agents_bootstrap:
+            emit("  - Merge `.agentic/AGENTS-BOOTSTRAP.md` into root `AGENTS.md`.")
+        if mesh_work_item_count == 0:
+            emit(
+                "  - If no work items exist yet, copy/edit `{0}`, then run "
+                "`mesh bootstrap-tasks --input <file>`.".format(bootstrap_example)
+            )
+    return 0
+
+
+def _bootstrap_tasks_example_path(repo_root: Path, coordination_root: Path) -> str:
+    repo_example = repo_root / ".agentic/examples/bootstrap-tasks.json"
+    if repo_example.exists():
+        return ".agentic/examples/bootstrap-tasks.json"
+    coordination_example = coordination_root / ".agentic/examples/bootstrap-tasks.json"
+    if coordination_example.exists():
+        return str(coordination_example)
+    return ".agentic/examples/bootstrap-tasks.json"
+
+
+def emit_adoption_list(label: str, values: list[str]) -> None:
+    emit("{0}:".format(label))
+    if not values:
+        emit("  - none detected")
+        return
+    for value in values[:12]:
+        emit("  - {0}".format(value))
+    if len(values) > 12:
+        emit("  - ... {0} more".format(len(values) - 12))
+
+
+def discover_product_artifacts(repo_root: Path) -> list[str]:
+    candidates = [
+        "README.md",
+        "docs",
+        "src",
+        "app",
+        "apps",
+        "packages",
+        "pyproject.toml",
+        "package.json",
+        "Cargo.toml",
+        "go.mod",
+    ]
+    return [path for path in candidates if (repo_root / path).exists()]
+
+
+def discover_instruction_files(repo_root: Path) -> list[str]:
+    candidates = [
+        "AGENTS.md",
+        "CLAUDE.md",
+        "OPENCODE.md",
+        ".agents",
+        ".claude",
+        ".cursor",
+        ".windsurfrules",
+        "opencode.json",
+    ]
+    return [path for path in candidates if (repo_root / path).exists()]
+
+
+def discover_planning_sources(repo_root: Path) -> list[str]:
+    candidates = [
+        ".github",
+        ".github/ISSUE_TEMPLATE",
+        ".linear",
+        "linear.json",
+        ".jira",
+    ]
+    return [path for path in candidates if (repo_root / path).exists()]
+
+
+def discover_task_sources(repo_root: Path) -> list[str]:
+    matches: list[str] = []
+    ignored_dirs = {
+        ".git",
+        ".agentic",
+        ".agents",
+        ".claude",
+        ".cursor",
+        ".venv",
+        "node_modules",
+        "dist",
+        "build",
+        "__pycache__",
+    }
+    for path in repo_root.rglob("*"):
+        relative = path.relative_to(repo_root)
+        if any(part in ignored_dirs for part in relative.parts):
+            continue
+        if not path.is_file():
+            continue
+        name = path.name.lower()
+        if name in {"todo.md", "todos.md", "tasks.md", "roadmap.md", "backlog.md"}:
+            matches.append(str(relative))
+        elif "task" in name or "roadmap" in name or "backlog" in name:
+            if path.suffix.lower() in {".md", ".txt", ".json", ".yaml", ".yml"}:
+                matches.append(str(relative))
+    return sorted(matches)
 
 
 def handle_task_add(args: argparse.Namespace) -> int:
@@ -1423,6 +1687,42 @@ def handle_merge(args: argparse.Namespace) -> int:
         emit("Skipped dashboard rebuild due to warnings — run mesh sync to rebuild")
 
     return 2 if warnings_fired else 0
+
+
+def handle_upgrade(args: argparse.Namespace) -> int:
+    from agent_mesh.scaffold import install_git_hook, upgrade_definition_files
+    from agent_mesh.state.storage import resolve_repo_root
+
+    repo_root = resolve_repo_root(Path.cwd())
+
+    if args.hook_only:
+        path, created = install_git_hook(repo_root, force=True)
+        if created:
+            emit("Installed git hook: {0}".format(path))
+        else:
+            emit("Git hook already up to date: {0}".format(path))
+        return 0
+
+    result = upgrade_definition_files(repo_root)
+    for path in result.created:
+        try:
+            label = path.relative_to(repo_root)
+        except ValueError:
+            label = path
+        emit("Updated: {0}".format(label))
+    for path in result.skipped:
+        try:
+            label = path.relative_to(repo_root)
+        except ValueError:
+            label = path
+        emit("Unchanged: {0}".format(label))
+    emit(
+        "Upgrade complete: {0} updated, {1} unchanged.".format(
+            len(result.created), len(result.skipped)
+        )
+    )
+    emit("Coordination state (.agentic/work/, claims/, reviews/, handoffs/) was not modified.")
+    return 0
 
 
 def handle_sync(_: argparse.Namespace) -> int:

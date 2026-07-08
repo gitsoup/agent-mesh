@@ -166,6 +166,14 @@ def list_effective_work_items(repo_root: Path, coordination_root: Path | None = 
             except Exception:
                 continue
             items[item.id] = item
+        active_claims = {claim.work_id: claim for claim in list_claims(coordination_root)}
+        for work_id, claim in active_claims.items():
+            item = items.get(work_id)
+            if item is None:
+                continue
+            if claim.status == "in_progress" and item.status == "ready":
+                item.status = "in_progress"
+                item.updated_at = claim.last_seen
     return sorted(items.values(), key=lambda item: item.id)
 
 

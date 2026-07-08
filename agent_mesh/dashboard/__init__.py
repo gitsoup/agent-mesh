@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timedelta, timezone
 from typing import Iterable
 
 
@@ -11,8 +12,15 @@ def build_dashboard_payload(config, work_items: Iterable[object], claims: Iterab
     claims = list(claims)
     reviews = list(reviews)
     work_index = {item.id: item for item in work_items}
+    active_claim_ids = {
+        claim.work_id
+        for claim in claims
+        if _claim_is_active(claim, config.coordination.claim_stale_after_minutes)
+    }
 
-    status_counts = count_by_attr(work_items, "status")
+    status_counts = count_by_value(
+        _effective_work_status(item, active_claim_ids) for item in work_items
+    )
     kind_counts = count_by_attr(work_items, "kind")
     risk_counts = count_by_attr(work_items, "risk")
     total = len(work_items)
@@ -23,7 +31,7 @@ def build_dashboard_payload(config, work_items: Iterable[object], claims: Iterab
         {
             "id": item.id,
             "title": item.title,
-            "status": item.status,
+            "status": _effective_work_status(item, active_claim_ids),
             "kind": getattr(item, "kind", "unknown"),
             "risk": getattr(item, "risk", "unknown"),
             "module": getattr(item, "module", None),
@@ -94,7 +102,7 @@ def build_dashboard_payload(config, work_items: Iterable[object], claims: Iterab
             "blockedTasks": status_counts.get("blocked", 0),
             "pendingReviews": sum(1 for review in reviews if review.status == "pending_review"),
             "mergedReviews": sum(1 for review in reviews if review.status == "merged"),
-            "activeClaims": len(claims),
+            "activeClaims": len(active_claim_ids),
             "statusCounts": dict(sorted(status_counts.items())),
             "kindCounts": dict(sorted(kind_counts.items())),
             "riskCounts": dict(sorted(risk_counts.items())),
@@ -906,10 +914,41 @@ def render_dashboard_html(payload: dict) -> str:
     )
 
 
+def _parse_utc(raw: str | None) -> datetime | None:
+    if not raw:
+        return None
+    return datetime.fromisoformat(raw.replace("Z", "+00:00"))
+
+
+def _claim_is_active(claim, stale_after_minutes: int) -> bool:
+    if getattr(claim, "status", None) != "in_progress":
+        return False
+    last_seen = _parse_utc(getattr(claim, "last_seen", None))
+    if last_seen is None:
+        return False
+    now = datetime.now(timezone.utc)
+    return last_seen >= now - timedelta(minutes=stale_after_minutes)
+
+
+def _effective_work_status(item, active_claim_ids: set[str]) -> str:
+    status = getattr(item, "status", "unknown")
+    if status == "ready" and getattr(item, "id", None) in active_claim_ids:
+        return "in_progress"
+    return status
+
+
 def count_by_attr(items: Iterable[object], attr: str) -> dict[str, int]:
     counts: dict[str, int] = {}
     for item in items:
         key = str(getattr(item, attr, "unknown") or "unknown")
+        counts[key] = counts.get(key, 0) + 1
+    return counts
+
+
+def count_by_value(values: Iterable[str]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for value in values:
+        key = str(value or "unknown")
         counts[key] = counts.get(key, 0) + 1
     return counts
 

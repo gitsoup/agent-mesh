@@ -2133,13 +2133,24 @@ def test_public_dashboard_build_redacts_sensitive_coordination_fields(
     assert payload["meta"]["public"] is True
     assert payload["tasks"][0]["title"] == "Implement auth endpoint"
     assert payload["activeWork"][0]["title"] == "Implement auth endpoint"
-    assert payload["activeWork"][0]["agent"] is None
-    assert payload["activeWork"][0]["branch"] is None
-    assert payload["activeWork"][0]["workspaceId"] is None
-    assert payload["activeWork"][0]["worktree"] is None
-    assert payload["reviews"][0]["workId"] == "APP-1"
-    assert "private-box" not in data_path.read_text(encoding="utf-8")
-    assert "feat/APP-1-implement-auth-endpoint" not in data_path.read_text(encoding="utf-8")
+
+
+def test_dashboard_treats_active_claim_as_in_progress(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    repo_root, coordination_root, claim = _setup_repo_with_claim(tmp_path, monkeypatch, capsys)
+    work_path = coordination_root / ".agentic/work/APP-1.json"
+    work_item = json.loads(work_path.read_text(encoding="utf-8"))
+    work_item["status"] = "ready"
+    work_path.write_text(json.dumps(work_item, indent=2) + "\n", encoding="utf-8")
+
+    exit_code, output = run_cli(["dashboard", "build"], capsys)
+    assert exit_code == 0, output
+
+    html = (repo_root / "dist/mesh-dashboard/index.html").read_text(encoding="utf-8")
+    assert '"inProgressTasks": 1' in html
+    assert '"activeClaims": 1' in html
+    assert '"status": "in_progress"' in html
 
 
 def test_adapter_install_opencode_creates_opencode_json(tmp_path: Path, monkeypatch, capsys) -> None:

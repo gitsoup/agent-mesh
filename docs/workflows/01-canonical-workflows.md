@@ -49,7 +49,9 @@ Steps:
 7. Recommend defaults.
 8. Update context files if terminology is clarified.
 9. Create ADR only for durable decisions.
-10. Output alignment summary.
+10. Verify repo-specific claims against the actual tree, code, and schemas before stating them as facts.
+11. Treat design-doc or plan claims as hypotheses until confirmed in the repo; call out unresolved gaps explicitly.
+12. Output alignment summary.
 
 ## /to-prd
 
@@ -101,9 +103,11 @@ Steps:
 3. Validate work item.
 4. Check existing claim.
 5. Create/check a dedicated worktree and task branch unless worktree isolation is disabled by project config.
-6. Create claim file.
-7. Commit/push claim if remote exists.
-8. Output next steps, including the worktree path to enter.
+6. When worktree isolation is enabled, verify the base branch from project config, create or switch the task branch, and perform implementation only inside the dedicated worktree.
+7. Record the dedicated worktree path in the claim file's `worktree` field; do not point claims at the shared checkout.
+8. Create claim file.
+9. Commit/push claim if remote exists.
+10. Output next steps, including the worktree path to enter.
 
 Recovery:
 

@@ -11,4 +11,6 @@ Align a plan with repo context and decisions.
 5. Ask decision-shaping questions only when needed.
 6. Recommend defaults and update context if terminology is clarified.
 7. Create an ADR only for durable decisions.
-8. Output an alignment summary.
+8. Verify repo-specific claims against the actual tree, code, and schemas before stating them as facts.
+9. Treat design-doc or plan claims as hypotheses until confirmed in the repo; call out unresolved gaps explicitly.
+10. Output an alignment summary.

@@ -34,6 +34,8 @@ WORKFLOW_STEPS: Dict[str, List[str]] = {
         "Ask decision-shaping questions only when needed.",
         "Recommend defaults and update context if terminology is clarified.",
         "Create an ADR only for durable decisions.",
+        "Verify repo-specific claims against the actual tree, code, and schemas before stating them as facts.",
+        "Treat design-doc or plan claims as hypotheses until confirmed in the repo; call out unresolved gaps explicitly.",
         "Output an alignment summary.",
     ],
     "to-prd": [
@@ -61,6 +63,8 @@ WORKFLOW_STEPS: Dict[str, List[str]] = {
         "Validate the work item.",
         "Check for an existing claim.",
         "Create or verify a dedicated worktree and task branch unless worktree isolation is disabled.",
+        "When worktree isolation is enabled, verify the base branch from project config, create or switch the task branch, and perform implementation only inside the dedicated worktree.",
+        "Record the dedicated worktree path in the claim file's `worktree` field; do not point claims at the shared checkout.",
         "Create the claim file.",
         "Output the next implementation steps, including the worktree path to enter.",
     ],

@@ -192,6 +192,7 @@ done
 - `mesh task list`
 - `mesh task show`
 - `mesh claim`
+- `mesh route`
 - `mesh pr --dry-run`
 - `mesh review-packet`
 - `mesh dashboard build`

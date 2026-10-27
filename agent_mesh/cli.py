@@ -186,6 +186,18 @@ def build_parser() -> argparse.ArgumentParser:
     claim_parser.add_argument("--no-push", action="store_true")
     claim_parser.set_defaults(func=handle_claim)
 
+    route_parser = subparsers.add_parser(
+        "route", help="Resolve and verify the claimed implementation workspace."
+    )
+    route_parser.add_argument("work_id")
+    route_parser.add_argument(
+        "--json",
+        action="store_true",
+        dest="as_json",
+        help="Emit stable machine-readable routing metadata.",
+    )
+    route_parser.set_defaults(func=handle_route)
+
     pr_parser = subparsers.add_parser("pr", help="Prepare a pull request body.")
     pr_parser.add_argument("--work-id", required=True)
     pr_parser.add_argument("--dry-run", action="store_true")
@@ -846,6 +858,8 @@ def handle_adapter_install(args: argparse.Namespace) -> int:
 def maybe_emit_runtime_adapter_tip(args: argparse.Namespace) -> None:
     if getattr(args, "command", None) in {None, "version", "init"}:
         return
+    if getattr(args, "command", None) == "route" and getattr(args, "as_json", False):
+        return
     if getattr(args, "command", None) == "adapter" and getattr(args, "adapter_command", None) == "install":
         return
 
@@ -1324,7 +1338,104 @@ def handle_claim(args: argparse.Namespace) -> int:
         emit("Worktree: {0}".format(worktree))
         if workspace_id:
             emit("Workspace: {0}".format(workspace_id))
-        emit("REQUIRED: cd {0}".format(worktree))
+        emit("Agent route: mesh route {0} --json".format(args.work_id))
+        emit("Human shell (optional): cd {0}".format(worktree))
+    return 0
+
+
+def handle_route(args: argparse.Namespace) -> int:
+    """Resolve a claim to a verified execution root without changing cwd."""
+    from agent_mesh.config import load_project_config
+    from agent_mesh.state.storage import load_claim, resolve_coordination_root, resolve_repo_root
+
+    repo_root = resolve_repo_root(Path.cwd())
+    coordination_root = resolve_coordination_root(repo_root)
+    config = load_project_config(repo_root)
+    claim_path = coordination_root / ".agentic/claims" / "{0}.json".format(args.work_id)
+    if not claim_path.exists():
+        emit("ERROR: no active claim found for {0}".format(args.work_id))
+        return 1
+
+    try:
+        claim, warning = load_claim(claim_path)
+    except Exception as error:
+        emit("ERROR: invalid claim for {0}: {1}".format(args.work_id, error))
+        return 1
+    work_path = resolve_current_work_item_path(repo_root, coordination_root, args.work_id)
+    if not work_path.exists():
+        emit("ERROR: work item {0} not found; claim routing would be orphaned".format(args.work_id))
+        return 1
+    if warning and not args.as_json:
+        emit("WARNING: {0}".format(warning))
+    if claim.status != "in_progress":
+        emit(
+            "ERROR: claim for {0} is {1}, not in_progress".format(
+                args.work_id, claim.status
+            )
+        )
+        return 1
+    if claim_activity(claim, config.coordination.claim_stale_after_minutes) != "active":
+        emit(
+            "ERROR: claim for {0} is stale; resume or take over the claim before routing".format(
+                args.work_id
+            )
+        )
+        return 1
+    if not claim.worktree:
+        emit(
+            "ERROR: claim for {0} has no dedicated worktree; automatic routing is unavailable".format(
+                args.work_id
+            )
+        )
+        return 1
+
+    worktree = Path(claim.worktree).expanduser().resolve()
+    if not worktree.exists() or not (worktree / ".git").exists():
+        emit("ERROR: claimed worktree is missing or invalid at {0}".format(worktree))
+        return 1
+
+    branch_result = run_git(worktree, ["branch", "--show-current"])
+    if branch_result.returncode != 0:
+        detail = (branch_result.stderr or branch_result.stdout).strip() or "unknown git error"
+        emit("ERROR: failed to inspect claimed worktree branch: {0}".format(detail))
+        return 1
+    actual_branch = branch_result.stdout.strip()
+    if actual_branch != claim.branch:
+        emit("ERROR: claimed worktree is on the wrong branch.")
+        emit("Expected: {0}".format(claim.branch))
+        emit("Actual: {0}".format(actual_branch or "detached HEAD"))
+        return 1
+
+    current_result = run_git(Path.cwd(), ["rev-parse", "--show-toplevel"])
+    if current_result.returncode == 0:
+        current_checkout = Path(current_result.stdout.strip()).resolve()
+    else:
+        current_checkout = Path.cwd().resolve()
+    current_checkout_matches = current_checkout == worktree
+    payload = {
+        "work_id": claim.work_id,
+        "worktree": str(worktree),
+        "branch": claim.branch,
+        "workspace_id": claim.workspace_id,
+        "current_checkout": str(current_checkout),
+        "current_checkout_matches": current_checkout_matches,
+        "route_required": not current_checkout_matches,
+        "warnings": [warning] if warning else [],
+    }
+
+    if args.as_json:
+        print(json.dumps(payload, sort_keys=True))
+        return 0
+
+    emit("Work item: {0}".format(claim.work_id))
+    emit("Worktree: {0}".format(worktree))
+    emit("Branch: {0}".format(claim.branch))
+    emit("Workspace: {0}".format(claim.workspace_id or "unspecified"))
+    emit("Current checkout: {0}".format(current_checkout))
+    emit("Route required: {0}".format("yes" if not current_checkout_matches else "no"))
+    if not current_checkout_matches:
+        emit("REQUIRED: run every implementation tool with working directory {0}".format(worktree))
+    emit("NOTE: mesh route reports the execution root; it cannot change a parent shell directory.")
     return 0
 
 
@@ -2056,7 +2167,8 @@ def handle_existing_claim(repo_root, coordination_root, config, work_item, claim
             emit("Worktree: {0}".format(claim.worktree))
             if claim.workspace_id:
                 emit("Workspace: {0}".format(claim.workspace_id))
-            emit("Next: cd {0}".format(claim.worktree))
+            emit("Agent route: mesh route {0} --json".format(work_item.id))
+            emit("Human shell (optional): cd {0}".format(claim.worktree))
         return 0
 
     if args.takeover:
@@ -2111,7 +2223,8 @@ def handle_existing_claim(repo_root, coordination_root, config, work_item, claim
             emit("Worktree: {0}".format(claim.worktree))
             if claim.workspace_id:
                 emit("Workspace: {0}".format(claim.workspace_id))
-            emit("Next: cd {0}".format(claim.worktree))
+            emit("Agent route: mesh route {0} --json".format(work_item.id))
+            emit("Human shell (optional): cd {0}".format(claim.worktree))
         return 0
 
     emit(

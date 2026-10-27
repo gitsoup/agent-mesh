@@ -135,6 +135,9 @@ Implement the claimed task safely.
 Responsibilities:
 
 - Treat `/implement` as task-oriented by default in ongoing-coordination mode, not as a continuation of the latest conversational subtopic.
+- Resolve the active claim with `mesh route <WORK-ID> --json` before any write.
+- Use the returned worktree as the explicit working directory for every tool
+  operation; do not rely on a one-time `cd` persisting across agent tool calls.
 - Read task, claim, PRD, context, and relevant ADRs.
 - Use tests and feedback loops.
 - Prefer vertical slices.

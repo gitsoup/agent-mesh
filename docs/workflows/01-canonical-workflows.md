@@ -107,7 +107,8 @@ Steps:
 7. Record the dedicated worktree path in the claim file's `worktree` field; do not point claims at the shared checkout.
 8. Create claim file.
 9. Commit/push claim if remote exists.
-10. Output next steps, including the worktree path to enter.
+10. Output `mesh route <ID> --json` for agent/runner routing and the worktree
+    path as an optional human-shell `cd`.
 
 Recovery:
 
@@ -123,14 +124,17 @@ Input: current claim.
 
 Steps:
 
-1. Read work item and claim.
-2. Read PRD/context/ADRs.
-3. Plan smallest vertical slice.
-4. Add or update tests.
-5. Implement.
-6. Run verification.
-7. Record evidence.
-8. Stop before opening PR.
+1. Run `mesh route <WORK-ID> --json`; stop without writing if it fails.
+2. Use the returned worktree as the explicit working directory for every tool
+   operation. Mesh reports the route but cannot change the parent shell cwd.
+3. Read work item and claim.
+4. Read PRD/context/ADRs.
+5. Plan smallest vertical slice.
+6. Add or update tests.
+7. Implement in the routed workspace.
+8. Run verification.
+9. Record evidence.
+10. Stop before opening PR.
 
 ## /pr
 

@@ -1,0 +1,39 @@
+name: Approved issue gate
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+
+permissions:
+  issues: read
+  pull-requests: read
+
+jobs:
+  approved-issue:
+    name: approved-issue
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require an approved, linked issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const body = context.payload.pull_request.body ?? "";
+            const closingIssue = /(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d+)/ig.exec(body);
+            if (!closingIssue) {
+              core.setFailed("This pull request must include a closing reference such as `Closes #123`.");
+              return;
+            }
+
+            const issueNumber = Number(closingIssue[1]);
+            const { data: issue } = await github.rest.issues.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+            });
+            const labels = issue.labels.map((label) => typeof label === "string" ? label : label.name);
+            const required = ["approved", "ready-for-development"];
+            const missing = required.filter((label) => !labels.includes(label));
+
+            if (missing.length) {
+              core.setFailed(`Issue #${issueNumber} must carry ${missing.map((label) => `\`${label}\``).join(" and ")}.`);
+            }

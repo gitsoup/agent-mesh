@@ -1,0 +1,40 @@
+name: Bug report
+description: Report a reproducible problem in Agent Mesh.
+title: "[Bug]: "
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve Agent Mesh. Please search existing issues before filing a new report.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What happened?
+      description: Describe the observed behavior and its impact.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Run ...
+        2. Then ...
+        3. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment and logs
+      description: Include the Agent Mesh version, OS, Python version, and relevant redacted output.
+      render: shell
+    validations:
+      required: false

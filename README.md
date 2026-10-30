@@ -122,6 +122,23 @@ with a top-level `tasks` array. Missing task IDs are assigned automatically
 using the repo project key. `mesh init` scaffolds a sample task file at
 `.agentic/examples/bootstrap-tasks.json`.
 
+## Claimed-worktree routing
+
+After a task is claimed, an agent or local runner can resolve its verified
+execution root from any checkout:
+
+```bash
+mesh route APP-1
+mesh route APP-1 --json
+```
+
+The command validates that the active claim has a real worktree checked out on
+the recorded task branch. Human-readable output is useful for operators; JSON
+output is intended for agents and runners that set an explicit working
+directory for each tool call. `mesh route` does not and cannot change the
+calling shell's directory. The `/implement` workflow requires consumers to use
+the returned worktree for every read, write, command, test, and git operation.
+
 ## Adapter Activation
 
 `mesh init` establishes the shared repo contract. It does not require every

@@ -80,6 +80,7 @@ mesh task add
 mesh task list
 mesh task show
 mesh claim
+mesh route
 mesh pr --dry-run
 mesh review-packet
 mesh dashboard build
@@ -151,6 +152,7 @@ mesh adapter install codex
 mesh task add "Implement auth endpoint" --module api
 mesh task list
 mesh claim APP-1 --agent codex --role implementer --no-push
+mesh route APP-1 --json
 mesh status
 mesh pr --dry-run --work-id APP-1
 mesh dashboard build

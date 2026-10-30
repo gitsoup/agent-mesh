@@ -27,7 +27,9 @@ Claim a ready work item and prepare implementation context.
      commit the new claim file from `.agentic/claims/`.
    - Commit message: `chore(state): claim {TASK-ID} — {short title}`
    - This makes the claim visible to other agents and the dashboard immediately.
-12. Output the next implementation steps, including the worktree path to enter.
+12. Output `mesh route <WORK-ID> --json` for agent/runner routing and the
+    worktree path as an optional human-shell `cd`; do not require the human to
+    relocate an agent that can set an explicit working directory.
 
 ## Recovery
 

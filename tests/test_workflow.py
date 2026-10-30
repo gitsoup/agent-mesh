@@ -152,6 +152,9 @@ def test_init_creates_agentic_scaffold(tmp_path: Path, monkeypatch, capsys) -> N
     assert len(bootstrap_payload["tasks"]) == 2
     assert bootstrap_payload["tasks"][0]["title"] == "Map existing architecture and ownership"
     assert (repo_root / ".agentic/workflows/claim.md").exists()
+    implement = (repo_root / ".agentic/workflows/implement.md").read_text(encoding="utf-8")
+    assert "mesh route <WORK-ID> --json" in implement
+    assert "explicit working directory" in implement
     assert (repo_root / ".agentic/workflows/ongoing.md").exists()
     ongoing = (repo_root / ".agentic/workflows/ongoing.md").read_text(encoding="utf-8")
     assert "already uses Agent Mesh" in ongoing
@@ -491,7 +494,8 @@ def test_claim_creates_dedicated_worktree_when_required(tmp_path: Path, monkeypa
     )
     assert exit_code == 0
     assert "Worktree:" in output
-    assert "REQUIRED: cd" in output
+    assert "Agent route: mesh route APP-1 --json" in output
+    assert "Human shell (optional): cd" in output
 
     coordination_root = repo_root.parent / "{0}-mesh-state".format(repo_root.name)
     claim = json.loads((coordination_root / ".agentic/claims/APP-1.json").read_text(encoding="utf-8"))
@@ -541,7 +545,8 @@ def test_claim_auto_selects_first_idle_lane(tmp_path: Path, monkeypatch, capsys)
     )
     assert exit_code == 0
     assert "Workspace: {0}".format(first_lane["workspace_id"]) in output
-    assert "REQUIRED: cd {0}".format(first_lane_path) in output
+    assert "Agent route: mesh route APP-1 --json" in output
+    assert "Human shell (optional): cd {0}".format(first_lane_path) in output
 
     claim = json.loads((coordination_root / ".agentic/claims/APP-1.json").read_text(encoding="utf-8"))
     assert claim["workspace_id"] == first_lane["workspace_id"]
@@ -620,7 +625,8 @@ def test_claim_recreates_missing_lane_worktree(tmp_path: Path, monkeypatch, caps
     )
     assert exit_code == 0
     assert lane_path.exists()
-    assert "REQUIRED: cd {0}".format(lane_path) in output
+    assert "Agent route: mesh route APP-1 --json" in output
+    assert "Human shell (optional): cd {0}".format(lane_path) in output
 
 
 def test_claim_errors_when_all_lanes_are_active(tmp_path: Path, monkeypatch, capsys) -> None:
@@ -2518,6 +2524,70 @@ def test_pr_workspace_guard_blocks_run_from_wrong_directory(tmp_path: Path, monk
     assert "ERROR: mesh pr must be run from the claimed worktree." in output
     assert "REQUIRED:" in output
     assert claim["worktree"] in output
+
+
+def test_route_from_shared_root_resolves_claimed_worktree(tmp_path: Path, monkeypatch, capsys) -> None:
+    repo_root, _, claim = _setup_repo_with_claim(tmp_path, monkeypatch, capsys)
+    monkeypatch.chdir(repo_root)
+
+    exit_code, output = run_cli(["route", "APP-1"], capsys)
+
+    assert exit_code == 0
+    assert "Route required: yes" in output
+    assert "REQUIRED: run every implementation tool with working directory" in output
+    assert claim["worktree"] in output
+    assert claim["branch"] in output
+
+
+def test_route_json_is_machine_readable_from_claimed_worktree(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    repo_root, _, claim = _setup_repo_with_claim(tmp_path, monkeypatch, capsys)
+    (repo_root / ".agents/skills/claim/SKILL.md").unlink()
+    monkeypatch.setenv("MESH_AGENT_RUNTIME", "codex")
+    monkeypatch.chdir(Path(claim["worktree"]))
+
+    exit_code, output = run_cli(["route", "APP-1", "--json"], capsys)
+
+    assert exit_code == 0
+    payload = json.loads(output)
+    assert payload == {
+        "branch": claim["branch"],
+        "current_checkout": str(Path(claim["worktree"]).resolve()),
+        "current_checkout_matches": True,
+        "route_required": False,
+        "warnings": [],
+        "work_id": "APP-1",
+        "workspace_id": claim["workspace_id"],
+        "worktree": str(Path(claim["worktree"]).resolve()),
+    }
+
+
+def test_route_rejects_missing_claim(tmp_path: Path, monkeypatch, capsys) -> None:
+    repo_root = init_repo(tmp_path, monkeypatch, capsys)
+    monkeypatch.chdir(repo_root)
+
+    exit_code, output = run_cli(["route", "APP-404"], capsys)
+
+    assert exit_code == 1
+    assert "ERROR: no active claim found for APP-404" in output
+
+
+def test_route_rejects_claimed_worktree_on_wrong_branch(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    repo_root, _, claim = _setup_repo_with_claim(tmp_path, monkeypatch, capsys)
+    worktree = Path(claim["worktree"])
+    subprocess.run(
+        ["git", "switch", "--detach"], cwd=worktree, check=True, capture_output=True
+    )
+    monkeypatch.chdir(repo_root)
+
+    exit_code, output = run_cli(["route", "APP-1"], capsys)
+
+    assert exit_code == 1
+    assert "ERROR: claimed worktree is on the wrong branch." in output
+    assert "Actual: detached HEAD" in output
 
 
 def test_pr_workspace_guard_passes_from_correct_worktree(tmp_path: Path, monkeypatch, capsys) -> None:

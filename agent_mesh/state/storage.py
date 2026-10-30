@@ -216,7 +216,7 @@ def list_reviews(repo_root: Path) -> List[ReviewPacket]:
 
 
 def refresh_claim_last_seen(repo_root: Path, cwd: Path) -> None:
-    """Bump last_seen on any in-progress claim whose worktree matches cwd."""
+    """Bump last_seen on any in-progress claim whose local checkout matches cwd."""
     coordination_root = resolve_coordination_root(repo_root)
     claims_dir = coordination_root / ".agentic/claims"
     if not claims_dir.exists():
@@ -227,9 +227,23 @@ def refresh_claim_last_seen(repo_root: Path, cwd: Path) -> None:
             claim = load_model(path, Claim)
         except Exception:
             continue
-        if claim.status != "in_progress" or not claim.worktree:
+        if claim.status != "in_progress":
             continue
-        if Path(claim.worktree).resolve() != cwd_resolved:
+        worktrees = subprocess.run(
+            ["git", "worktree", "list", "--porcelain"],
+            cwd=repo_root,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        local_worktree = None
+        for line in worktrees.stdout.splitlines():
+            if line.startswith("worktree "):
+                candidate = Path(line.removeprefix("worktree "))
+            elif line == "branch refs/heads/{0}".format(claim.branch):
+                local_worktree = candidate
+                break
+        if local_worktree is None or local_worktree.resolve() != cwd_resolved:
             continue
         try:
             now = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")

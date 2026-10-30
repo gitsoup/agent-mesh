@@ -1,0 +1,21 @@
+{
+  "schema_version": "0.1",
+  "work_id": "MESH-26",
+  "status": "in_progress",
+  "claimed_by": "agent:codex:KWG7MJW1H9",
+  "agent_runtime": "codex",
+  "role": "implementer",
+  "workspace_id": "codex-kwg7mjw1h9",
+  "branch": "feat/MESH-26-synchronize-approved-github-issues-with-agent-mesh-work-items",
+  "claimed_at": "2026-10-30T00:38:28Z",
+  "last_seen": "2026-10-30T00:38:28Z",
+  "evidence": [],
+  "events": [
+    {
+      "action": "claimed",
+      "at": "2026-10-30T00:38:28Z",
+      "by": "agent:codex:KWG7MJW1H9",
+      "note": null
+    }
+  ]
+}

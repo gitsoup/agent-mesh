@@ -1,0 +1,25 @@
+{
+  "schema_version": "0.1",
+  "id": "MESH-3",
+  "title": "Design greenfield repo onboarding flow",
+  "description": "Design greenfield repo onboarding flow",
+  "kind": "feature",
+  "status": "ready",
+  "execution": "afk_safe",
+  "module": "onboarding",
+  "planning": {
+    "provider": "local",
+    "url": null,
+    "external_id": null
+  },
+  "prd": null,
+  "acceptance_criteria": [
+    "Define agent behavior for empty repos",
+    "Map /align, /to-prd, /to-tasks, and /triage into first-run workflow",
+    "Document required state and generated artifacts"
+  ],
+  "dependencies": [],
+  "risk": "medium",
+  "created_at": "2026-05-17T12:27:57Z",
+  "updated_at": "2026-05-17T12:27:57Z"
+}

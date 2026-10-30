@@ -1,0 +1,62 @@
+{
+  "schema_version": "0.1",
+  "work_id": "MESH-25",
+  "status": "completed",
+  "claimed_by": "agent:codex:KWG7MJW1H9",
+  "agent_runtime": "codex",
+  "role": "implementer",
+  "workspace_id": "codex-kwg7mjw1h9",
+  "branch": "feat/MESH-25-add-github-issue-intake-and-approval-gates",
+  "claimed_at": "2026-10-29T22:56:44Z",
+  "last_seen": "2026-10-30T00:05:00Z",
+  "evidence": [
+    {
+      "kind": "validation",
+      "command": "ruby -ryaml -e 'ARGV.each { |path| YAML.load_file(path) }' .github/ISSUE_TEMPLATE/*.yml .github/workflows/*.yml && git diff --check",
+      "result": "passed",
+      "summary": "All Issue Forms and workflow files parsed as YAML; Git whitespace check passed.",
+      "created_at": "2026-10-29T22:58:00Z"
+    },
+    {
+      "kind": "ci",
+      "command": "gh pr checks 19 --watch --interval 5",
+      "result": "passed",
+      "summary": "Approved issue gate and agent-mesh-status checks passed on PR #19.",
+      "created_at": "2026-10-29T22:59:00Z"
+    },
+    {
+      "kind": "test",
+      "command": "uv run pytest",
+      "result": "failed",
+      "summary": "One environment-sensitive failure: test_init_without_git_identity_fails_preflight_before_writing_state observed a Git identity.",
+      "created_at": "2026-10-29T22:58:00Z"
+    },
+    {
+      "kind": "merge",
+      "command": "gh pr merge 19 --squash --delete-branch",
+      "result": "passed",
+      "summary": "PR #19 merged as e118f77; GitHub automatically closed Issue #18.",
+      "created_at": "2026-10-30T00:04:54Z"
+    }
+  ],
+  "events": [
+    {
+      "action": "claimed",
+      "at": "2026-10-29T22:56:44Z",
+      "by": "agent:codex:KWG7MJW1H9",
+      "note": null
+    },
+    {
+      "action": "pr_opened",
+      "at": "2026-10-29T23:00:00Z",
+      "by": "agent:codex:KWG7MJW1H9",
+      "note": "https://github.com/gitsoup/agent-mesh/pull/19"
+    },
+    {
+      "action": "merged",
+      "at": "2026-10-30T00:04:53Z",
+      "by": "github:gitsoup",
+      "note": "PR #19 merged; Issue #18 closed."
+    }
+  ]
+}

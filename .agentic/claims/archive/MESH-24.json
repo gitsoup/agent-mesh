@@ -1,0 +1,56 @@
+{
+  "schema_version": "0.1",
+  "work_id": "MESH-24",
+  "status": "completed",
+  "claimed_by": "agent:codex:KWG7MJW1H9",
+  "agent_runtime": "codex",
+  "role": "implementer",
+  "workspace_id": "codex-implement-route",
+  "branch": "feat/MESH-24-route-implement-workflow-to-claimed-worktree-automatically",
+  "claimed_at": "2026-10-27T17:24:23Z",
+  "last_seen": "2026-10-30T00:32:00Z",
+  "evidence": [
+    {
+      "kind": "test",
+      "command": "GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=init.defaultBranch GIT_CONFIG_VALUE_0=main uv run pytest",
+      "result": "passed",
+      "summary": "124 tests passed",
+      "created_at": "2026-10-27T17:33:38Z"
+    },
+    {
+      "kind": "manual",
+      "command": "<local-path> route MESH-24 --json",
+      "result": "passed",
+      "summary": "Shared-root invocation resolved and verified the claimed worktree with route_required=true",
+      "created_at": "2026-10-27T17:33:38Z"
+    },
+    {
+      "kind": "test",
+      "command": "uv run pytest -k route",
+      "result": "passed",
+      "summary": "4 routing tests passed after rebasing onto main.",
+      "created_at": "2026-10-30T00:27:00Z"
+    },
+    {
+      "kind": "merge",
+      "command": "gh pr merge 21 --squash --delete-branch",
+      "result": "passed",
+      "summary": "PR #21 merged as bbba221; GitHub automatically closed Issue #20.",
+      "created_at": "2026-10-30T00:31:42Z"
+    }
+  ],
+  "events": [
+    {
+      "action": "claimed",
+      "at": "2026-10-27T17:24:23Z",
+      "by": "agent:codex:KWG7MJW1H9",
+      "note": null
+    },
+    {
+      "action": "merged",
+      "at": "2026-10-30T00:31:41Z",
+      "by": "github:gitsoup",
+      "note": "PR #21 merged; Issue #20 closed."
+    }
+  ]
+}

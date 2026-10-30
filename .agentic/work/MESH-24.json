@@ -1,0 +1,27 @@
+{
+  "schema_version": "0.1",
+  "id": "MESH-24",
+  "title": "Route implement workflow to claimed worktree automatically",
+  "description": "Add a deterministic routing command for active claims and update the canonical implement workflow so agents invoked from the shared root resolve, validate, and use the claimed worktree for every operation without requiring a human cd. The CLI must not pretend it can change the parent shell directory.",
+  "kind": "feature",
+  "status": "done",
+  "execution": "afk_safe",
+  "module": "coordination",
+  "planning": {
+    "provider": "github",
+    "url": "https://github.com/gitsoup/agent-mesh/issues/20",
+    "external_id": "20"
+  },
+  "prd": null,
+  "acceptance_criteria": [
+    "A CLI route command resolves an active work item claim from any checkout and reports the claimed worktree, branch, workspace, and whether the current checkout matches.",
+    "Machine-readable output is available for agent runners, and invalid or missing claims, worktrees, and branch mismatches fail safely without writes.",
+    "The canonical /implement workflow and generated adapters require route resolution before any write and explicit claimed-worktree execution for all tools.",
+    "Tests cover routing from the shared root, routing from the claimed worktree, structured output, and failure cases.",
+    "Documentation explains that Mesh supplies routing metadata but cannot change a parent shell cwd; agents or runners consume the route."
+  ],
+  "dependencies": [],
+  "risk": "medium",
+  "created_at": "2026-10-27T17:24:07Z",
+  "updated_at": "2026-10-30T00:32:00Z"
+}

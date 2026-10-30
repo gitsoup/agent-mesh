@@ -1,0 +1,25 @@
+{
+  "schema_version": "0.1",
+  "id": "MESH-2",
+  "title": "Design init TUI and first-run question flow",
+  "description": "Design init TUI and first-run question flow",
+  "kind": "feature",
+  "status": "ready",
+  "execution": "afk_safe",
+  "module": "cli",
+  "planning": {
+    "provider": "local",
+    "url": null,
+    "external_id": null
+  },
+  "prd": null,
+  "acceptance_criteria": [
+    "Define questions for empty vs existing repos",
+    "Specify adapter, provider, and dashboard selection flow",
+    "Define what init should scaffold versus defer to later workflows"
+  ],
+  "dependencies": [],
+  "risk": "medium",
+  "created_at": "2026-05-17T12:27:30Z",
+  "updated_at": "2026-05-17T12:27:30Z"
+}

@@ -1,0 +1,26 @@
+{
+  "schema_version": "0.1",
+  "id": "MESH-25",
+  "title": "Add GitHub issue intake and approval gates",
+  "description": "Make GitHub Issues the public request queue, document the maintainer approval policy, and enforce issue-linked pull requests before merge.",
+  "kind": "feature",
+  "status": "done",
+  "execution": "afk_safe",
+  "module": "github",
+  "planning": {
+    "provider": "github",
+    "url": "https://github.com/gitsoup/agent-mesh/issues/18",
+    "external_id": "18"
+  },
+  "prd": null,
+  "acceptance_criteria": [
+    "Contributors can submit structured bug reports and feature requests through GitHub Issue Forms.",
+    "Only issues explicitly labelled ready-for-development are eligible for agent implementation.",
+    "Pull requests must link an approved issue and pass repository checks before merge.",
+    "The default branch requires a reviewed pull request and passing CI."
+  ],
+  "dependencies": [],
+  "risk": "medium",
+  "created_at": "2026-10-29T22:56:39Z",
+  "updated_at": "2026-10-30T00:05:00Z"
+}

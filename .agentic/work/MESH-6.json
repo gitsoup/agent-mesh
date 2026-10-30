@@ -1,0 +1,25 @@
+{
+  "schema_version": "0.1",
+  "id": "MESH-6",
+  "title": "Design repo-mode detection and startup routing",
+  "description": "Design repo-mode detection and startup routing",
+  "kind": "feature",
+  "status": "done",
+  "execution": "afk_safe",
+  "module": "onboarding",
+  "planning": {
+    "provider": "local",
+    "url": null,
+    "external_id": null
+  },
+  "prd": null,
+  "acceptance_criteria": [
+    "Define how agents detect greenfield, brownfield adoption, and ongoing coordination modes",
+    "Specify which files and signals should be inspected first on startup",
+    "Define the recommended next workflow for each detected mode"
+  ],
+  "dependencies": [],
+  "risk": "medium",
+  "created_at": "2026-05-17T13:10:14Z",
+  "updated_at": "2026-05-17T17:45:00Z"
+}

@@ -1,0 +1,37 @@
+{
+  "schema_version": "0.1",
+  "type": "review_request",
+  "id": "PR-MESH-25",
+  "work_id": "MESH-25",
+  "pr": {
+    "number": 19,
+    "url": "https://github.com/gitsoup/agent-mesh/pull/19",
+    "branch": "feat/MESH-25-add-github-issue-intake-and-approval-gates",
+    "base": "main"
+  },
+  "author": {
+    "agent_runtime": "codex",
+    "role": "implementer"
+  },
+  "requested_role": "reviewer",
+  "context": {
+    "work_item": ".agentic/work/MESH-25.json",
+    "claim": ".agentic/claims/MESH-25.json",
+    "prd": null,
+    "context_files": [
+      ".agentic/context/CONTEXT.md",
+      ".agentic/context/CONTEXT-MAP.md"
+    ]
+  },
+  "evidence": [
+    {
+      "kind": "ci",
+      "command": "gh pr checks 19 --watch --interval 5",
+      "result": "passed",
+      "summary": "Approved issue gate and agent-mesh-status checks passed.",
+      "created_at": "2026-10-30T00:03:00Z"
+    }
+  ],
+  "status": "merged",
+  "created_at": "2026-10-30T00:05:00Z"
+}

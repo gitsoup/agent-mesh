@@ -1,0 +1,31 @@
+{
+  "schema_version": "0.1",
+  "type": "review_request",
+  "id": "PR-MESH-24",
+  "work_id": "MESH-24",
+  "pr": {
+    "number": 21,
+    "url": "https://github.com/gitsoup/agent-mesh/pull/21",
+    "branch": "feat/MESH-24-route-implement-workflow-to-claimed-worktree-automatically",
+    "base": "main"
+  },
+  "author": {"agent_runtime": "codex", "role": "implementer"},
+  "requested_role": "reviewer",
+  "context": {
+    "work_item": ".agentic/work/MESH-24.json",
+    "claim": ".agentic/claims/MESH-24.json",
+    "prd": null,
+    "context_files": [".agentic/context/CONTEXT.md", ".agentic/context/CONTEXT-MAP.md"]
+  },
+  "evidence": [
+    {
+      "kind": "test",
+      "command": "uv run pytest -k route",
+      "result": "passed",
+      "summary": "4 routing tests passed.",
+      "created_at": "2026-10-30T00:27:00Z"
+    }
+  ],
+  "status": "merged",
+  "created_at": "2026-10-30T00:32:00Z"
+}

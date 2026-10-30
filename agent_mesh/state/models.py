@@ -57,9 +57,12 @@ class Claim(BaseModel):
     claimed_by: str
     agent_runtime: str
     role: str
-    machine: str
+    # Machine and worktree locations are local implementation details.  Older
+    # claim files may contain them, but shared coordination state must never
+    # write them back to git.
+    machine: Optional[str] = Field(default=None, exclude=True)
     workspace_id: Optional[str] = None
-    worktree: Optional[str] = None
+    worktree: Optional[str] = Field(default=None, exclude=True)
     branch: str
     claimed_at: str
     last_seen: str

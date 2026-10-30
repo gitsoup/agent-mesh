@@ -2512,6 +2512,18 @@ def _setup_repo_with_claim(tmp_path: Path, monkeypatch, capsys, *, worktree_poli
     else:
         coordination_root = repo_root
     claim = json.loads((coordination_root / ".agentic/claims/APP-1.json").read_text(encoding="utf-8"))
+    # Paths are deliberately local-only; derive the fixture convenience value
+    # from git rather than reintroducing it to committed state.
+    for entry in subprocess.run(
+        ["git", "worktree", "list", "--porcelain"],
+        cwd=repo_root,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.split("\n\n"):
+        if "branch refs/heads/{0}".format(claim["branch"]) in entry:
+            claim["worktree"] = entry.splitlines()[0].removeprefix("worktree ")
+            break
     return repo_root, coordination_root, claim
 
 
@@ -2524,6 +2536,14 @@ def test_pr_workspace_guard_blocks_run_from_wrong_directory(tmp_path: Path, monk
     assert "ERROR: mesh pr must be run from the claimed worktree." in output
     assert "REQUIRED:" in output
     assert claim["worktree"] in output
+
+
+def test_claim_state_omits_machine_and_worktree_paths(tmp_path: Path, monkeypatch, capsys) -> None:
+    _, coordination_root, _ = _setup_repo_with_claim(tmp_path, monkeypatch, capsys)
+    published = json.loads((coordination_root / ".agentic/claims/APP-1.json").read_text(encoding="utf-8"))
+
+    assert "machine" not in published
+    assert "worktree" not in published
 
 
 def test_route_from_shared_root_resolves_claimed_worktree(tmp_path: Path, monkeypatch, capsys) -> None:

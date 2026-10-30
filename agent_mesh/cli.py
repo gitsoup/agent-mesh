@@ -1299,10 +1299,9 @@ def handle_claim(args: argparse.Namespace) -> int:
     claim = Claim(
         work_id=args.work_id,
         status="in_progress",
-        claimed_by="agent:{0}:{1}".format(args.agent, args.machine),
+        claimed_by="agent:{0}".format(args.agent),
         agent_runtime=args.agent,
         role=args.role,
-        machine=args.machine,
         workspace_id=workspace_id,
         worktree=worktree,
         branch=branch,
@@ -1312,7 +1311,7 @@ def handle_claim(args: argparse.Namespace) -> int:
             ClaimEvent(
                 action="claimed",
                 at=now,
-                by="agent:{0}:{1}".format(args.agent, args.machine),
+                by="agent:{0}".format(args.agent),
             )
         ],
     )
@@ -1381,15 +1380,14 @@ def handle_route(args: argparse.Namespace) -> int:
             )
         )
         return 1
-    if not claim.worktree:
+    worktree = resolve_claim_worktree(repo_root, claim)
+    if worktree is None:
         emit(
-            "ERROR: claim for {0} has no dedicated worktree; automatic routing is unavailable".format(
+            "ERROR: no local worktree for claim {0}; automatic routing is unavailable".format(
                 args.work_id
             )
         )
         return 1
-
-    worktree = Path(claim.worktree).expanduser().resolve()
     if not worktree.exists() or not (worktree / ".git").exists():
         emit("ERROR: claimed worktree is missing or invalid at {0}".format(worktree))
         return 1
@@ -1451,10 +1449,10 @@ def handle_pr(args: argparse.Namespace) -> int:
     work_item = load_model(work_path, WorkItem)
     claim = load_model(coordination_root / ".agentic/claims" / "{0}.json".format(args.work_id), Claim)
 
-    if claim.worktree:
-        worktree_path = Path(claim.worktree)
+    worktree_path = resolve_claim_worktree(repo_root, claim)
+    if worktree_path is not None:
         if not worktree_path.exists():
-            emit("WARNING: claimed worktree no longer exists at {0} — proceeding from current directory".format(claim.worktree))
+            emit("WARNING: local claimed worktree no longer exists at {0} — proceeding from current directory".format(worktree_path))
         else:
             current_path = Path.cwd().resolve()
             target_worktree = worktree_path.resolve()
@@ -2144,13 +2142,12 @@ def handle_existing_claim(repo_root, coordination_root, config, work_item, claim
 
     now = utc_now()
     activity = claim_activity(claim, config.coordination.claim_stale_after_minutes)
-    actor = "agent:{0}:{1}".format(args.agent, args.machine)
+    actor = "agent:{0}".format(args.agent)
 
     if args.resume:
         claim.claimed_by = actor
         claim.agent_runtime = args.agent
         claim.role = args.role
-        claim.machine = args.machine
         claim.workspace_id = claim.workspace_id or args.workspace_id or derive_workspace_id(
             args.agent, args.machine
         )
@@ -2200,7 +2197,6 @@ def handle_existing_claim(repo_root, coordination_root, config, work_item, claim
         claim.claimed_by = actor
         claim.agent_runtime = args.agent
         claim.role = args.role
-        claim.machine = args.machine
         claim.workspace_id = takeover_workspace_id
         claim.branch = requested_branch
         claim.last_seen = now
@@ -2243,6 +2239,31 @@ def run_git(repo_root: Path, args: Sequence[str]) -> subprocess.CompletedProcess
         capture_output=True,
         text=True,
     )
+
+
+def resolve_claim_worktree(repo_root: Path, claim) -> Optional[Path]:
+    """Find this machine's checkout for a claim without publishing its path.
+
+    A branch can be checked out in at most one local git worktree, so the
+    local worktree registry is the authority for this machine.  The legacy
+    ``claim.worktree`` value is accepted only while reading older state.
+    """
+    if claim.worktree:
+        candidate = Path(claim.worktree).expanduser()
+        if candidate.exists() and (candidate / ".git").exists():
+            return candidate.resolve()
+
+    result = run_git(repo_root, ["worktree", "list", "--porcelain"])
+    if result.returncode != 0:
+        return None
+    current_path: Optional[Path] = None
+    expected = "refs/heads/{0}".format(claim.branch)
+    for line in result.stdout.splitlines():
+        if line.startswith("worktree "):
+            current_path = Path(line.removeprefix("worktree "))
+        elif line == "branch {0}".format(expected) and current_path is not None:
+            return current_path.resolve()
+    return None
 
 
 def branch_exists(repo_root: Path, branch: str) -> bool:

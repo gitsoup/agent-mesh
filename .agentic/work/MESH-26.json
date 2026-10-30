@@ -1,0 +1,26 @@
+{
+  "schema_version": "0.1",
+  "id": "MESH-26",
+  "title": "Synchronize approved GitHub Issues with Agent Mesh work items",
+  "description": "Import and link approved GitHub Issues as MESH work items, synchronize lifecycle state, and document the Issue \u2192 MESH \u2192 PR workflow.",
+  "kind": "feature",
+  "status": "ready",
+  "execution": "afk_safe",
+  "module": "github",
+  "planning": {
+    "provider": "github",
+    "url": "https://github.com/gitsoup/agent-mesh/issues/22",
+    "external_id": "22"
+  },
+  "prd": null,
+  "acceptance_criteria": [
+    "Approved GitHub Issues can be imported or linked idempotently as MESH work items.",
+    "Linked work items persist their GitHub Issue URL and number and reject unapproved or unready Issues.",
+    "Issue, MESH work item, and PR lifecycle status can be synchronized.",
+    "Tests and documentation cover the provider workflow."
+  ],
+  "dependencies": [],
+  "risk": "medium",
+  "created_at": "2026-10-30T00:38:15Z",
+  "updated_at": "2026-10-30T00:38:15Z"
+}
